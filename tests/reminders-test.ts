@@ -1,4 +1,4 @@
-import { computeReminderFireAt } from "../convex/lib/reminders";
+import { computeReminderFireAt, snoozeFireAt } from "../convex/lib/reminders";
 
 function at(y: number, m: number, d: number, h: number, min = 0): Date {
   return new Date(y, m - 1, d, h, min, 0, 0);
@@ -36,4 +36,9 @@ describe("computeReminderFireAt", () => {
     const now = at(2026, 10, 17, 8);
     expect(computeReminderFireAt(due, now)).toEqual(at(2026, 10, 17, 9));
   });
+});
+
+test("snooze is next local 09:00", () => {
+  expect(snoozeFireAt(at(2026, 10, 16, 10))).toEqual(at(2026, 10, 17, 9));
+  expect(snoozeFireAt(at(2026, 10, 16, 8))).toEqual(at(2026, 10, 16, 9));
 });

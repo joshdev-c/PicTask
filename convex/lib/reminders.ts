@@ -29,3 +29,9 @@ export function computeReminderFireAt(dueAt: Date, now: Date): Date {
   }
   return now;
 }
+
+export function snoozeFireAt(now: Date): Date {
+  const todayNine = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0);
+  if (todayNine.getTime() > now.getTime()) return todayNine;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+}
