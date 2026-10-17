@@ -11,7 +11,9 @@ import { Spacing } from '@/constants/theme';
 SplashScreen.preventAutoHideAsync();
 
 const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
-const convex = convexUrl ? new ConvexReactClient(convexUrl, { unsavedChangesWarning: false }) : null;
+const convex = convexUrl
+  ? new ConvexReactClient(convexUrl, { unsavedChangesWarning: false })
+  : null;
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -22,6 +24,7 @@ export default function RootLayout() {
       <ThemeProvider value={theme}>
         <ThemedView style={styles.missingEnv}>
           <ThemedText type="subtitle">Set EXPO_PUBLIC_CONVEX_URL</ThemedText>
+          <AnimatedSplashOverlay />
         </ThemedView>
       </ThemeProvider>
     );
