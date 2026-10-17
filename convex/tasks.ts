@@ -30,7 +30,7 @@ async function completeTask(ctx: MutationCtx, taskId: Id<'tasks'>): Promise<void
       .collect();
     let allDone = steps.length > 0;
     for (const step of steps) {
-      const stepTask = step.taskId === taskId ? task : await ctx.db.get(step.taskId);
+      const stepTask = await ctx.db.get(step.taskId);
       if (stepTask?.status !== 'done') {
         allDone = false;
         break;

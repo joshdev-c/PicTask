@@ -13,6 +13,8 @@ type ReminderRow = {
   blockedByStepIndex?: number;
   amount?: number;
   currency?: string;
+  documentId?: string;
+  sourceName?: string;
 };
 
 export const list = query({
@@ -24,6 +26,7 @@ export const list = query({
       if (reminder.status !== 'scheduled') continue;
       const task = await ctx.db.get(reminder.taskId);
       if (!task) continue;
+      const document = await ctx.db.get(task.documentId);
       let locked = false;
       let blockedByStepIndex: number | undefined;
       if (task.workflowId) {
@@ -51,6 +54,8 @@ export const list = query({
         blockedByStepIndex,
         amount: task.amount,
         currency: task.currency,
+        documentId: task.documentId,
+        sourceName: document?.title,
       });
     }
     return rows;
