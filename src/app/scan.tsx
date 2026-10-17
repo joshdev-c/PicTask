@@ -13,6 +13,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { api } from '@/lib/api';
 import { uploadPickedFile } from '@/lib/upload';
+import type { Id } from '../../convex/_generated/dataModel';
 
 type PickedFile = {
   uri: string;
@@ -89,14 +90,16 @@ export default function ScanScreen() {
         mimeType: picked.mimeType,
         generateUploadUrl: () => generateUploadUrl({}),
       });
-      const documentId = await createDocument({
+      const documentId: Id<'documents'> = await createDocument({
         storageId,
         fileName: picked.name,
         mimeType: picked.mimeType,
         kindHint: kind,
       });
       router.replace({ pathname: '/review/[documentId]', params: { documentId } });
-      void runExtraction({ documentId }).catch(() => {});
+      void runExtraction({ documentId }).catch(() =>
+        Alert.alert('Could not start extraction. Check your connection.'),
+      );
     } catch {
       Alert.alert('Could not upload. Check your connection.');
     } finally {

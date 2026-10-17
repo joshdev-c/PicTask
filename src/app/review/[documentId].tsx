@@ -8,36 +8,39 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { api } from '@/lib/api';
+import type { Id } from '../../../convex/_generated/dataModel';
 import {
-    parseExtractionJson,
-    type ExtractionResult,
-    type ExtractionTask,
+  parseExtractionJson,
+  type ExtractionResult,
+  type ExtractionTask,
 } from '../../../convex/lib/extraction';
 
-export function ErrorBoundary({ error }: ErrorBoundaryProps) {
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="subtitle">Review extracted tasks</ThemedText>
         <ThemedText themeColor="textSecondary">{error.message}</ThemedText>
+        <ActionButton label="Try again" onPress={retry} />
       </SafeAreaView>
     </ThemedView>
   );
 }
 
 export default function ReviewScreen() {
-  const { documentId } = useLocalSearchParams<{ documentId: string }>();
+  const { documentId } = useLocalSearchParams<{ documentId: Id<'documents'> }>();
 
   return <ReviewContent documentId={documentId} />;
 }
 
-function ReviewContent({ documentId }: { documentId: string }) {
+function ReviewContent({ documentId }: { documentId: Id<'documents'> }) {
   const document = useQuery(api.documents.get, { documentId });
   const retry = useMutation(api.documents.retry);
   const acceptSuggestions = useMutation(api.documents.acceptSuggestions);
   const runExtraction = useAction(api.extract.run);
   const [dropped, setDropped] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const extraction = parseSuggestions(document?.suggestionJson);
   const selectedIndexes = extraction
@@ -51,13 +54,18 @@ function ReviewContent({ documentId }: { documentId: string }) {
   };
 
   const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
     try {
       await retry({ documentId });
+      void runExtraction({ documentId }).catch(() =>
+        Alert.alert('Could not start extraction. Check your connection.'),
+      );
     } catch {
       Alert.alert('Could not retry. Check your connection.');
-      return;
+    } finally {
+      setRetrying(false);
     }
-    void runExtraction({ documentId }).catch(() => {});
   };
 
   const handleAccept = async () => {
@@ -99,7 +107,7 @@ function ReviewContent({ documentId }: { documentId: string }) {
             <ThemedText themeColor="textSecondary">
               {document.errorMessage ?? 'Extraction failed.'}
             </ThemedText>
-            <ActionButton label="Retry" onPress={handleRetry} />
+            <ActionButton label="Retry" onPress={handleRetry} disabled={retrying} />
           </>
         ) : document.status !== 'ready' ? (
           <ThemedText themeColor="textSecondary">Extracting…</ThemedText>

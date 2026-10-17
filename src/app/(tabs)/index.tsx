@@ -1,6 +1,6 @@
 import { useQuery } from 'convex/react';
 import { type ErrorBoundaryProps } from 'expo-router';
-import { StyleSheet } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ScanFab } from '@/components/pictask/scan-fab';
@@ -10,12 +10,15 @@ import { Spacing } from '@/constants/theme';
 import { api } from '@/lib/api';
 import type { AgendaItem } from '../../../convex/lib/agenda';
 
-export function ErrorBoundary({ error }: ErrorBoundaryProps) {
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="subtitle">Today</ThemedText>
         <ThemedText themeColor="textSecondary">{error.message}</ThemedText>
+        <Pressable onPress={retry}>
+          <ThemedText type="linkPrimary">Try again</ThemedText>
+        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
