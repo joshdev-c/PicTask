@@ -75,6 +75,13 @@ export const setFailed = mutation({
   },
 });
 
+export const retry = mutation({
+  args: { documentId: v.id('documents') },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.documentId, { status: 'extracting', errorMessage: undefined });
+  },
+});
+
 export const saveExtraction = mutation({
   args: { documentId: v.id('documents'), rawJson: v.string() },
   handler: async (ctx, args) => {
