@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScanFab } from '@/components/pictask/scan-fab';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -11,6 +12,7 @@ export default function VaultScreen() {
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="subtitle">Vault</ThemedText>
       </SafeAreaView>
+      <ScanFab />
     </ThemedView>
   );
 }

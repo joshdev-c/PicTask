@@ -32,6 +32,13 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "PicTask uses the camera to scan bills, receipts, and forms.",
+          "photosPermission": "PicTask uses your photos to import documents."
+        }
       ]
     ],
     "experiments": {
