@@ -1,12 +1,13 @@
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { router, useLocalSearchParams, type ErrorBoundaryProps } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Radius, Shadow, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import {
@@ -19,9 +20,9 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedText type="subtitle">Review extracted tasks</ThemedText>
+        <ThemedText type="heading">Review extracted tasks</ThemedText>
         <ThemedText themeColor="textSecondary">{error.message}</ThemedText>
-        <ActionButton label="Try again" onPress={retry} />
+        <PrimaryButton label="Try again" onPress={retry} />
       </SafeAreaView>
     </ThemedView>
   );
@@ -34,6 +35,7 @@ export default function ReviewScreen() {
 }
 
 function ReviewContent({ documentId }: { documentId: Id<'documents'> }) {
+  const theme = useTheme();
   const document = useQuery(api.documents.get, { documentId });
   const retry = useMutation(api.documents.retry);
   const acceptSuggestions = useMutation(api.documents.acceptSuggestions);
@@ -85,7 +87,7 @@ function ReviewContent({ documentId }: { documentId: Id<'documents'> }) {
     return (
       <ThemedView style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
-          <ThemedText type="subtitle">Review extracted tasks</ThemedText>
+          <ThemedText type="heading">Review extracted tasks</ThemedText>
           <ThemedText themeColor="textSecondary">Loading…</ThemedText>
         </SafeAreaView>
       </ThemedView>
@@ -93,70 +95,119 @@ function ReviewContent({ documentId }: { documentId: Id<'documents'> }) {
   }
 
   const pages = typeof document.pageCount === 'number' ? ` · ${document.pageCount} page(s)` : '';
+  const details = detailRowsFor(document.fields);
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedText type="subtitle">{document.title}</ThemedText>
-        <ThemedText themeColor="textSecondary">
-          {document.fileName}
-          {pages}
-        </ThemedText>
-        {document.status === 'failed' ? (
-          <>
-            <ThemedText themeColor="textSecondary">
-              {document.errorMessage ?? 'Extraction failed.'}
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <ThemedText type="heading">{document.title}</ThemedText>
+            <ThemedText type="caption" themeColor="textSecondary">
+              {document.fileName}
+              {pages}
             </ThemedText>
-            <ActionButton label="Retry" onPress={handleRetry} disabled={retrying} />
-          </>
-        ) : document.status !== 'ready' ? (
-          <ThemedText themeColor="textSecondary">Extracting…</ThemedText>
-        ) : (
-          <>
-            <View style={styles.details}>
-              <DetailRow
-                label="Amount"
-                value={formatAmount(document.fields?.amount, document.fields?.currency)}
-              />
-              <DetailRow label="Due" value={document.fields?.dueAt} />
-              <DetailRow label="Account" value={document.fields?.accountNo} />
+          </View>
+
+          {document.status === 'failed' ? (
+            <View style={styles.section}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {document.errorMessage ?? 'Extraction failed.'}
+              </ThemedText>
+              <PrimaryButton label="Retry" onPress={handleRetry} disabled={retrying} />
             </View>
-            {extraction?.tasks.map((task, index) => (
-              <Pressable key={`${index}-${task.title}`} onPress={() => toggleSuggestion(index)}>
-                <ThemedView
-                  type={dropped.includes(index) ? 'background' : 'backgroundElement'}
-                  style={styles.suggestion}
-                >
-                  <View style={styles.suggestionHeader}>
-                    <ThemedText type="smallBold">{task.title}</ThemedText>
-                    <ThemedText themeColor="textSecondary" type="small">
-                      {dropped.includes(index) ? 'Dropped' : 'Included'}
-                    </ThemedText>
-                  </View>
-                  {taskMeta(task) ? (
-                    <ThemedText themeColor="textSecondary" type="small">
-                      {taskMeta(task)}
-                    </ThemedText>
-                  ) : null}
-                  {task.sourceQuote ? (
-                    <ThemedText themeColor="textSecondary" type="small">
-                      “{task.sourceQuote}”
-                    </ThemedText>
-                  ) : null}
-                  <ThemedText themeColor="textSecondary" type="small">
-                    {document.fileName}
-                    {task.sourcePage ? `, p.${task.sourcePage}` : ''}
-                  </ThemedText>
-                </ThemedView>
-              </Pressable>
-            ))}
-            <ActionButton
-              label={`Add ${selectedIndexes.length} tasks to PicTask`}
-              onPress={handleAccept}
-              disabled={selectedIndexes.length === 0 || saving}
-            />
-          </>
-        )}
+          ) : document.status !== 'ready' ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Extracting…
+            </ThemedText>
+          ) : (
+            <>
+              <ThemedText type="smallBold" style={{ color: theme.green }}>
+                {details.length} detail{details.length === 1 ? '' : 's'} found
+              </ThemedText>
+
+              {details.length > 0 ? (
+                <View style={styles.section}>
+                  <ThemedText type="cardTitle">Detected details</ThemedText>
+                  <ThemedView type="backgroundElement" style={styles.card}>
+                    {details.map((row) => (
+                      <DetailRow key={row.label} label={row.label} value={row.value} />
+                    ))}
+                  </ThemedView>
+                </View>
+              ) : null}
+
+              {extraction && extraction.tasks.length > 0 ? (
+                <View style={styles.section}>
+                  <ThemedText type="cardTitle">Suggested tasks</ThemedText>
+                  {extraction.tasks.map((task, index) => {
+                    const included = !dropped.includes(index);
+                    return (
+                      <Pressable
+                        key={`${index}-${task.title}`}
+                        onPress={() => toggleSuggestion(index)}
+                        style={({ pressed }) => (pressed ? styles.pressed : null)}
+                      >
+                        <ThemedView
+                          type="backgroundElement"
+                          style={[styles.suggestion, included ? null : styles.suggestionDropped]}
+                        >
+                          <View style={styles.suggestionHeader}>
+                            <ThemedText type="cardTitle" style={styles.suggestionTitle}>
+                              {task.title}
+                            </ThemedText>
+                            <View
+                              style={[
+                                styles.chip,
+                                {
+                                  backgroundColor: included
+                                    ? theme.brandTint
+                                    : theme.backgroundSelected,
+                                },
+                              ]}
+                            >
+                              <ThemedText
+                                type="caption"
+                                themeColor={included ? 'brand' : 'textSecondary'}
+                                style={styles.chipText}
+                              >
+                                {included ? 'Included' : 'Dropped'}
+                              </ThemedText>
+                            </View>
+                          </View>
+                          {taskMeta(task) ? (
+                            <ThemedText type="small" themeColor="textSecondary">
+                              {taskMeta(task)}
+                            </ThemedText>
+                          ) : null}
+                          {task.sourceQuote ? (
+                            <View style={[styles.quote, { backgroundColor: theme.amberSurface }]}>
+                              <ThemedText type="small" style={{ color: theme.amberInk }}>
+                                “{task.sourceQuote}”
+                              </ThemedText>
+                            </View>
+                          ) : null}
+                          <ThemedText type="caption" themeColor="brand" numberOfLines={1}>
+                            {document.fileName}
+                            {task.sourcePage ? `, p.${task.sourcePage}` : ''}
+                          </ThemedText>
+                        </ThemedView>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+              <PrimaryButton
+                label={`Add ${selectedIndexes.length} task${
+                  selectedIndexes.length === 1 ? '' : 's'
+                } to PicTask`}
+                onPress={handleAccept}
+                disabled={selectedIndexes.length === 0 || saving}
+              />
+            </>
+          )}
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
@@ -171,6 +222,22 @@ function parseSuggestions(suggestionJson: unknown): ExtractionResult | null {
   }
 }
 
+function detailRowsFor(fields?: {
+  amount?: number;
+  currency?: string;
+  dueAt?: string;
+  accountNo?: string;
+  referenceNo?: string;
+}): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const amount = formatAmount(fields?.amount, fields?.currency);
+  if (amount) rows.push({ label: 'Amount', value: amount });
+  if (fields?.dueAt) rows.push({ label: 'Due', value: fields.dueAt });
+  if (fields?.accountNo) rows.push({ label: 'Account', value: fields.accountNo });
+  if (fields?.referenceNo) rows.push({ label: 'Reference', value: fields.referenceNo });
+  return rows;
+}
+
 function formatAmount(amount: unknown, currency: unknown): string | undefined {
   if (typeof amount !== 'number') return undefined;
   return typeof currency === 'string' ? `${amount} ${currency}` : String(amount);
@@ -183,19 +250,18 @@ function taskMeta(task: ExtractionTask): string {
   return parts.join(' · ');
 }
 
-function DetailRow({ label, value }: { label: string; value?: string | number | null }) {
-  if (value === undefined || value === null) return null;
+function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailRow}>
-      <ThemedText themeColor="textSecondary" type="small">
+      <ThemedText type="small" themeColor="textSecondary">
         {label}
       </ThemedText>
-      <ThemedText type="smallBold">{String(value)}</ThemedText>
+      <ThemedText type="smallBold">{value}</ThemedText>
     </View>
   );
 }
 
-function ActionButton({
+function PrimaryButton({
   label,
   onPress,
   disabled,
@@ -204,9 +270,15 @@ function ActionButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const theme = useTheme();
   return (
     <Pressable
-      style={[styles.button, disabled ? styles.buttonDisabled : null]}
+      style={({ pressed }) => [
+        styles.button,
+        { backgroundColor: theme.brand },
+        disabled ? styles.buttonDisabled : null,
+        pressed && !disabled ? styles.pressed : null,
+      ]}
       onPress={onPress}
       disabled={disabled}
     >
@@ -223,12 +295,24 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  content: {
+    gap: Spacing.three,
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
-    gap: Spacing.three,
+    paddingBottom: Spacing.five,
   },
-  details: {
+  header: {
+    gap: Spacing.one,
+  },
+  section: {
     gap: Spacing.two,
+  },
+  card: {
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radius.lg,
+    ...Shadow.card,
   },
   detailRow: {
     flexDirection: 'row',
@@ -238,23 +322,46 @@ const styles = StyleSheet.create({
   suggestion: {
     gap: Spacing.two,
     padding: Spacing.three,
-    borderRadius: 12,
+    borderRadius: Radius.lg,
+    ...Shadow.card,
+  },
+  suggestionDropped: {
+    opacity: 0.5,
   },
   suggestionHeader: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
+  suggestionTitle: {
+    flex: 1,
+  },
+  chip: {
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.two + Spacing.half,
+    borderRadius: Radius.pill,
+  },
+  chipText: {
+    fontWeight: '700',
+  },
+  quote: {
+    padding: Spacing.three,
+    borderRadius: Radius.md,
+  },
   button: {
     alignItems: 'center',
-    paddingVertical: Spacing.three,
-    borderRadius: 12,
-    backgroundColor: '#208AEF',
+    paddingVertical: Spacing.three + Spacing.half,
+    borderRadius: Radius.lg,
   },
   buttonDisabled: {
     opacity: 0.4,
   },
   buttonText: {
     color: '#ffffff',
+    fontSize: 16,
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

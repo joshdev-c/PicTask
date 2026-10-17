@@ -4,13 +4,12 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { KIND_CHIPS, KindChips, type ScanKind } from '@/components/pictask/kind-chips';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { api } from '@/lib/api';
 import { uploadPickedFile } from '@/lib/upload';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -20,6 +19,8 @@ type PickedFile = {
   mimeType: string;
   name: string;
 };
+
+const DETECTED_GREEN = '#7BD3A4';
 
 export default function ScanScreen() {
   const [kind, setKind] = useState<ScanKind>('document');
@@ -107,47 +108,76 @@ export default function ScanScreen() {
     }
   };
 
+  const isPdf = picked?.mimeType === 'application/pdf';
+
   return (
-    <ThemedView style={styles.container}>
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KindChips value={kind} onChange={setKind} />
-        {picked ? (
-          <View style={styles.preview}>
-            <Image source={picked.uri} style={styles.previewImage} contentFit="cover" />
-            <View style={styles.overlay}>
-              <ThemedText type="smallBold" style={styles.overlayText}>
-                {kindLabel} selected
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ThemedText type="smallBold" style={styles.status}>
+            {picked ? `${kindLabel} detected` : 'No document selected yet'}
+          </ThemedText>
+
+          {picked ? (
+            <View style={styles.preview}>
+              {isPdf ? (
+                <View style={[styles.previewImage, styles.pdfPreview]}>
+                  <ThemedText type="heading" style={styles.pdfTitle}>
+                    PDF
+                  </ThemedText>
+                  <ThemedText type="caption" style={styles.pdfName} numberOfLines={2}>
+                    {picked.name}
+                  </ThemedText>
+                </View>
+              ) : (
+                <Image source={picked.uri} style={styles.previewImage} contentFit="cover" />
+              )}
+            </View>
+          ) : (
+            <View style={[styles.preview, styles.previewEmpty]}>
+              <ThemedText type="label" style={styles.previewEmptyLabel}>
+                DOCUMENT PREVIEW
+              </ThemedText>
+              <ThemedText type="small" style={styles.previewEmptyHint}>
+                Take a photo or import a file to extract its tasks.
               </ThemedText>
             </View>
+          )}
+
+          <KindChips value={kind} onChange={setKind} />
+
+          <View style={styles.actions}>
+            <PickerButton label="Take photo" onPress={takePhoto} />
+            <PickerButton label="Photo library" onPress={pickPhoto} />
+            <PickerButton label="Import PDF" onPress={importPdf} />
           </View>
-        ) : (
-          <ThemedView type="backgroundElement" style={[styles.preview, styles.previewEmpty]}>
-            <ThemedText themeColor="textSecondary">No document selected yet</ThemedText>
-          </ThemedView>
-        )}
-        <View style={styles.actions}>
-          <PickerButton label="Take photo" onPress={takePhoto} />
-          <PickerButton label="Photo library" onPress={pickPhoto} />
-          <PickerButton label="Import PDF" onPress={importPdf} />
-        </View>
-        {picked ? (
-          <Pressable style={styles.done} onPress={handleDone} disabled={uploading}>
-            <ThemedText type="smallBold" style={styles.doneText}>
-              {uploading ? 'Uploading…' : 'Done'}
-            </ThemedText>
-          </Pressable>
-        ) : null}
+
+          {picked ? (
+            <Pressable
+              style={({ pressed }) => [styles.done, pressed ? styles.pressed : null]}
+              onPress={handleDone}
+              disabled={uploading}
+            >
+              <ThemedText type="smallBold" style={styles.doneText}>
+                {uploading ? 'Uploading…' : 'Done'}
+              </ThemedText>
+            </Pressable>
+          ) : null}
+        </ScrollView>
       </SafeAreaView>
-    </ThemedView>
+    </View>
   );
 }
 
 function PickerButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress}>
-      <ThemedView type="backgroundElement" style={styles.button}>
-        <ThemedText type="smallBold">{label}</ThemedText>
-      </ThemedView>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
+    >
+      <ThemedText type="smallBold" style={styles.buttonText}>
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
@@ -155,35 +185,59 @@ function PickerButton({ label, onPress }: { label: string; onPress: () => void }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0A3A44',
   },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.four,
+  },
+  content: {
+    flexGrow: 1,
     gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+    paddingBottom: Spacing.five,
+  },
+  status: {
+    color: DETECTED_GREEN,
   },
   preview: {
     flex: 1,
-    borderRadius: 16,
+    minHeight: 260,
+    borderRadius: Radius.lg,
     overflow: 'hidden',
-  },
-  previewEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#FBF2DA',
   },
   previewImage: {
     flex: 1,
   },
-  overlay: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: Spacing.three,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  previewEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    borderStyle: 'dashed',
   },
-  overlayText: {
-    color: '#ffffff',
+  previewEmptyLabel: {
+    color: 'rgba(255, 255, 255, 0.72)',
+  },
+  previewEmptyHint: {
+    color: 'rgba(255, 255, 255, 0.56)',
+    textAlign: 'center',
+    maxWidth: 240,
+  },
+  pdfPreview: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    padding: Spacing.four,
+  },
+  pdfTitle: {
+    color: '#0A3A44',
+  },
+  pdfName: {
+    color: '#593B00',
+    textAlign: 'center',
   },
   actions: {
     gap: Spacing.two,
@@ -191,15 +245,23 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     paddingVertical: Spacing.three,
-    borderRadius: 12,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  buttonText: {
+    color: '#ffffff',
   },
   done: {
     alignItems: 'center',
-    paddingVertical: Spacing.three,
-    borderRadius: 12,
-    backgroundColor: '#208AEF',
+    paddingVertical: Spacing.three + Spacing.half,
+    borderRadius: Radius.pill,
+    backgroundColor: '#F6AE2D',
   },
   doneText: {
-    color: '#ffffff',
+    color: '#08232B',
+    fontSize: 16,
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

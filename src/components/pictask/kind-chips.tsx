@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export const KIND_CHIPS = [
@@ -32,9 +32,15 @@ export function KindChips({
             onPress={() => onChange(chip.value)}
             style={[
               styles.chip,
-              { backgroundColor: theme[selected ? 'backgroundSelected' : 'backgroundElement'] },
+              {
+                backgroundColor: selected ? theme.amber : 'rgba(255, 255, 255, 0.10)',
+              },
             ]}>
-            <ThemedText type="smallBold">{chip.label}</ThemedText>
+            <ThemedText
+              type="smallBold"
+              style={[styles.label, { color: selected ? theme.darkSurfaceDeep : '#ffffff' }]}>
+              {chip.label}
+            </ThemedText>
           </Pressable>
         );
       })}
@@ -48,8 +54,13 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   chip: {
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderRadius: 999,
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.two + Spacing.half,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Radius.pill,
+  },
+  label: {
+    fontSize: 13,
   },
 });

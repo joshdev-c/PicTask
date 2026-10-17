@@ -1,8 +1,9 @@
+import type { Id } from '../../convex/_generated/dataModel';
 export async function uploadPickedFile(args: {
   uri: string;
   mimeType: string;
   generateUploadUrl: () => Promise<string>;
-}): Promise<{ storageId: string }> {
+}): Promise<{ storageId: Id<'_storage'> }> {
   const postUrl = await args.generateUploadUrl();
   const response = await fetch(args.uri);
   const blob = await response.blob();
@@ -14,5 +15,9 @@ export async function uploadPickedFile(args: {
   if (!result.ok) {
     throw new Error('Upload failed');
   }
-  return (await result.json()) as { storageId: string };
+  const data: { storageId: string } = await result.json();
+
+  return {
+    storageId: data.storageId as Id<'_storage'>,
+  };
 }

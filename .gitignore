@@ -44,3 +44,9 @@ example
 
 # git worktrees
 .worktrees/
+
+# Claude
+.claude/
+
+
+

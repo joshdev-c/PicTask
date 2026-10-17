@@ -21,7 +21,7 @@ export const complete = mutation({
 });
 
 export const agenda = query({
-  args: {},
+  args: {}, 
   handler: async (ctx) => {
     const documents = await ctx.db.query('documents').collect();
     const tasks = await ctx.db.query('tasks').collect();
