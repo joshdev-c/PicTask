@@ -65,11 +65,14 @@ afterIndex points at another task in this array or null. Use PHP and Philippine 
 
       const body = await response.text();
       if (!response.ok) {
-        throw new Error(`Anthropic API error ${response.status}: ${body}`);
+        throw new Error(`Anthropic API error ${response.status}`);
       }
 
-      const parsed = JSON.parse(body) as { content: { text: string }[] };
-      const rawJson = parsed.content[0].text;
+      const parsed = JSON.parse(body) as { content?: { text?: string }[] };
+      const rawJson = parsed.content?.[0]?.text;
+      if (!rawJson) {
+        throw new Error('Anthropic response contained no text content');
+      }
 
       const result = await ctx.runMutation(api.documents.saveExtraction, {
         documentId: args.documentId,
@@ -77,10 +80,14 @@ afterIndex points at another task in this array or null. Use PHP and Philippine 
       });
       return { ok: result.ok };
     } catch (error) {
-      await ctx.runMutation(api.documents.setFailed, {
-        documentId: args.documentId,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      try {
+        await ctx.runMutation(api.documents.setFailed, {
+          documentId: args.documentId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      } catch {
+        // Recording the failure must not mask the original error.
+      }
       return { ok: false };
     }
   },

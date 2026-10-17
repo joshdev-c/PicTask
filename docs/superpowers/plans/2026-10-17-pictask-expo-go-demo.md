@@ -937,6 +937,7 @@ api.documents.create({ storageId, fileName, mimeType, kindHint }) -> Id<"documen
 api.documents.get({ documentId })
 api.documents.list({ kind?, search? })
 api.documents.setFailed({ documentId, errorMessage })
+api.documents.retry({ documentId })
 api.documents.saveExtraction({ documentId, rawJson }) -> { ok: boolean }
 api.documents.acceptSuggestions({ documentId, selectedIndexes }) -> { workflowId?: Id<"workflows"> }
 api.tasks.get({ taskId })
