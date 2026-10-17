@@ -5,7 +5,6 @@ import type { Id } from './_generated/dataModel';
 import { planAcceptSuggestions } from './lib/accept';
 import { parseExtractionJson, type ExtractionResult } from './lib/extraction';
 import { computeReminderFireAt } from './lib/reminders';
-import { shouldFireReminderForStep, type StepState } from './lib/workflows';
 
 const documentKind = v.union(
   v.literal('document'),
@@ -87,11 +86,12 @@ export const saveExtraction = mutation({
     } catch (error) {
       // Convex mutations are transactional, so we must not rethrow here: the
       // failed status would be rolled back with the rest of the transaction.
+      // The failure is therefore reported through the return value instead.
       await ctx.db.patch(args.documentId, {
         status: 'failed',
         errorMessage: error instanceof Error ? error.message : 'Extraction failed',
       });
-      return;
+      return { ok: false };
     }
     await ctx.db.patch(args.documentId, {
       title: parsed.title,
@@ -103,6 +103,7 @@ export const saveExtraction = mutation({
       status: 'ready',
       errorMessage: undefined,
     });
+    return { ok: true };
   },
 });
 
@@ -153,16 +154,13 @@ export const acceptSuggestions = mutation({
       }
     }
 
-    const steps: StepState[] = [];
-    for (let index = 0; index < taskIds.length; index += 1) {
-      steps.push({ index, status: 'open' });
-    }
-
     const now = new Date();
+    // Locked workflow steps still get a reminder row; they are prevented from
+    // firing downstream because reminders.list marks them locked and the
+    // Reminders screen's syncLocalReminders skips locked rows.
     for (let index = 0; index < plan.tasks.length; index += 1) {
       const dueAt = plan.tasks[index].dueAt;
       if (dueAt === undefined) continue;
-      if (workflowId && !shouldFireReminderForStep(steps, index)) continue;
       await ctx.db.insert('reminders', {
         taskId: taskIds[index],
         fireAt: computeReminderFireAt(new Date(dueAt), now).getTime(),
