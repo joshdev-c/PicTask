@@ -16,7 +16,7 @@
 - Convex is source of truth; do not add SQLite or Firebase/Supabase.
 - Do not implement auto conflict detection or a fake “Dates don’t match” banner.
 - `boundingBox` may exist on tasks as optional unused data; do not highlight photo regions.
-- Default reminder: 3 days before due at 09:00 local; locked workflow steps must not fire.
+- Default reminder: 3 days before due at 09:00 **in the Convex runtime timezone** (UTC on a hosted deployment — not the phone's timezone). Accepted demo limitation; `computeReminderFireAt` deliberately stays a pure local-time function. Locked workflow steps must not fire.
 - Scan is a FAB on Today and Vault, not a bottom tab. Tabs in order: Today, Tasks, Vault, Reminders.
 - Windows installs for Jest use `npx expo install jest-expo jest @types/jest "--" --dev`.
 - Run tests with `npx jest --watchAll=false` (add `test:ci` script). Do not use `npm run test` if it is `--watchAll`.
@@ -937,9 +937,10 @@ api.documents.create({ storageId, fileName, mimeType, kindHint }) -> Id<"documen
 api.documents.get({ documentId })
 api.documents.list({ kind?, search? })
 api.documents.setFailed({ documentId, errorMessage })
-api.documents.saveExtraction({ documentId, rawJson })
+api.documents.saveExtraction({ documentId, rawJson }) -> { ok: boolean }
 api.documents.acceptSuggestions({ documentId, selectedIndexes }) -> { workflowId?: Id<"workflows"> }
 api.tasks.get({ taskId })
+api.tasks.listByDocument({ documentId })
 api.tasks.complete({ taskId })
 api.tasks.agenda({})
 api.workflows.get({ workflowId })
@@ -948,9 +949,11 @@ api.reminders.list({})
 api.reminders.snooze({ reminderId })
 ```
 
-`saveExtraction` parses with `parseExtractionJson`, writes fields onto the document, stores `suggestionJson` as the parsed object, sets `status` to `"ready"`. On throw, set `"failed"` and `errorMessage`.
+`saveExtraction` parses with `parseExtractionJson`, writes fields onto the document, stores `suggestionJson` as the parsed object, sets `status` to `"ready"`, and returns `{ ok: true }`. On a parse error it must **not** rethrow — Convex mutations are transactional, so throwing would roll back the `"failed"` patch. Instead patch `"failed"` + `errorMessage` and return `{ ok: false }`, so Task 6 can never report success for a failed parse.
 
-`acceptSuggestions` loads `suggestionJson`, runs `planAcceptSuggestions`, inserts tasks, optional workflow + steps, and a `reminders` row per dated task using `computeReminderFireAt(new Date(dueAt), new Date())`. Skip reminder insert when `createWorkflow` and `shouldFireReminderForStep` is false for that step.
+`acceptSuggestions` loads `suggestionJson`, runs `planAcceptSuggestions`, inserts tasks, optional workflow + steps, and a `reminders` row for **every** dated task using `computeReminderFireAt(new Date(dueAt), new Date())`, including steps that are still locked at accept time. Locked steps still never fire: `reminders.list` marks them `locked`, Task 12 lists them under `Later` as `Starts after step N`, and `syncLocalReminders` skips locked rows. Skipping the insert instead would make `reminders.list`'s `locked` flag and Task 12's locked copy unreachable.
+
+`completeTask` is a shared helper exported from `convex/lib/completeTask.ts` and called by both `convex/tasks.ts` and `convex/workflows.ts` — do not copy it into each module.
 
 Do not add a conflicts table.
 
@@ -1165,7 +1168,7 @@ npx convex env set ANTHROPIC_API_KEY <the-key>
 
 Do not write the key into any repo file.
 
-- [ ] **Step 2: Implement `convex/extract.ts`** using the contract above. `handler` must try/catch and always `setFailed` with `error.message` on failure, then return `{ ok: false }`. Success returns `{ ok: true }`.
+- [ ] **Step 2: Implement `convex/extract.ts`** using the contract above. `handler` must try/catch and always `setFailed` with `error.message` on failure, then return `{ ok: false }`. On success return the mutation's own verdict — `{ ok: (await ctx.runMutation(api.documents.saveExtraction, { documentId, rawJson })).ok }` — so a parse failure inside `saveExtraction` is never reported as success.
 
 - [ ] **Step 3: Manual action smoke (optional if no key yet)**
 
