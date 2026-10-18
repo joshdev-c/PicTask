@@ -156,8 +156,7 @@ export default function ScanScreen() {
             <Pressable
               style={({ pressed }) => [styles.done, pressed ? styles.pressed : null]}
               onPress={handleDone}
-              disabled={uploading}
-            >
+              disabled={uploading}>
               <ThemedText type="smallBold" style={styles.doneText}>
                 {uploading ? 'Uploading…' : 'Done'}
               </ThemedText>
@@ -173,8 +172,7 @@ function PickerButton({ label, onPress }: { label: string; onPress: () => void }
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
-    >
+      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}>
       <ThemedText type="smallBold" style={styles.buttonText}>
         {label}
       </ThemedText>

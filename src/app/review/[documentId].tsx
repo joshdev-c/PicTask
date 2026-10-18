@@ -222,13 +222,15 @@ function parseSuggestions(suggestionJson: unknown): ExtractionResult | null {
   }
 }
 
-function detailRowsFor(fields?: {
-  amount?: number;
-  currency?: string;
-  dueAt?: string;
-  accountNo?: string;
-  referenceNo?: string;
-}): { label: string; value: string }[] {
+function detailRowsFor(
+  fields?: {
+    amount?: number;
+    currency?: string;
+    dueAt?: string;
+    accountNo?: string;
+    referenceNo?: string;
+  },
+): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = [];
   const amount = formatAmount(fields?.amount, fields?.currency);
   if (amount) rows.push({ label: 'Amount', value: amount });

@@ -21,7 +21,7 @@ export default function AppTabs() {
         <CustomTabList>
           <TabTrigger name="index" href="/" asChild>
             <TabButton>Today</TabButton>
-          </TabTrigger>
+          </TabTrigger> 
           <TabTrigger name="tasks" href="/tasks" asChild>
             <TabButton>Tasks</TabButton>
           </TabTrigger>
