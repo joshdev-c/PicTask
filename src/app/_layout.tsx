@@ -10,6 +10,18 @@ import { Colors, Spacing } from '@/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
 
+try {
+  const { setNotificationHandler } = require('expo-notifications/build/NotificationsHandler');
+  setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+} catch {}
+
 const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
 const convex = convexUrl
   ? new ConvexReactClient(convexUrl, { unsavedChangesWarning: false })

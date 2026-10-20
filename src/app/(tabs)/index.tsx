@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQuery } from 'convex/react';
 import { router, type ErrorBoundaryProps } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -11,6 +12,12 @@ import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 import type { AgendaItem } from '../../../convex/lib/agenda';
+
+// Alert palette from the mockup
+const ALERT_BG = '#FBE9E6';
+const ALERT_FG = '#B3261E';
+
+type ConflictInfo = { title: string; body: string };
 
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return (
@@ -28,6 +35,35 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   );
 }
 
+function BrandLogo({ color }: { color: string }) {
+  return (
+    <View style={[styles.logo, { backgroundColor: color }]}>
+      <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+    </View>
+  );
+}
+
+function ConflictBanner({ conflict, onReview }: { conflict: ConflictInfo; onReview?: () => void }) {
+  return (
+    <View style={styles.alert}>
+      <Ionicons name="warning-outline" size={26} color={ALERT_FG} style={styles.alertIcon} />
+      <View style={styles.alertBody}>
+        <ThemedText type="heading" style={styles.alertTitle}>
+          {conflict.title}
+        </ThemedText>
+        <ThemedText type="small" style={styles.alertText}>
+          {conflict.body}
+        </ThemedText>
+        <Pressable onPress={onReview} hitSlop={8}>
+          <ThemedText type="smallBold" style={{ color: ALERT_FG }}>
+            Review conflict
+          </ThemedText>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export default function TodayScreen() {
   const agenda = useQuery(api.tasks.agenda, {});
   const theme = useTheme();
@@ -37,37 +73,44 @@ export default function TodayScreen() {
     day: 'numeric',
   });
 
+  // Design placeholder: the mockup's "Dates don't match" banner.
+  // Wire this to real data later; it renders nothing while null.
+  const conflict = null as ConflictInfo | null;
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            {/* ADD LOGO */}
-            <ThemedText
-              type="cardTitle"
-              style={[
-                styles.brand,
-                { color: theme.brand },
-                { fontSize: 36 },
-                { fontWeight: 'bold' },
-                { marginTop: Spacing.two },
-              ]}
-            >
-              PicTask
-            </ThemedText>
+            <View style={styles.brandRow}>
+              <View style={styles.brandLeft}>
+                <BrandLogo color={theme.brand} />
+                <ThemedText type="cardTitle" style={[styles.brand, { color: theme.brand }]}>
+                  PicTask
+                </ThemedText>
+              </View>
+              <Pressable style={styles.bell} hitSlop={8} onPress={() => router.push('/reminders')}>
+                <Ionicons name="notifications-outline" size={24} color={theme.text} />
+              </Pressable>
+            </View>
 
-            <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.four }}>
-              {today}
-            </ThemedText>
+            <View style={styles.titleBlock}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {today}
+              </ThemedText>
 
-            <ThemedText type="display" style={{ marginTop: Spacing.one }}>
-              {agenda === undefined
-                ? 'Loading…'
-                : agenda.length === 0
-                  ? 'All clear'
-                  : `${agenda.length} task${agenda.length === 1 ? '' : 's'} need attention`}
-            </ThemedText>
+              <ThemedText type="display" style={{ marginTop: Spacing.one, letterSpacing: 0.3 }}>
+                {agenda === undefined
+                  ? 'Loading…'
+                  : agenda.length === 0
+                    ? 'Great Job! All clear'
+                    : `${agenda.length} task${agenda.length === 1 ? '' : 's'} need attention`}
+              </ThemedText>
+            </View>
           </View>
+
+          {conflict ? <ConflictBanner conflict={conflict} /> : null}
+
           {agenda !== undefined && agenda.length > 0 ? (
             <>
               <View style={styles.sectionHeader}>
@@ -119,15 +162,63 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.three,
     paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.four,
+    paddingTop: Spacing.three,
     paddingBottom: BottomTabInset + Spacing.six,
   },
   header: {
-    gap: Spacing.one,
+    gap: Spacing.four,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brandLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  logo: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   brand: {
     fontSize: 22,
     lineHeight: 28,
+    fontWeight: '700',
+  },
+  bell: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleBlock: {
+    gap: Spacing.one,
+  },
+  alert: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: 20,
+    backgroundColor: ALERT_BG,
+  },
+  alertIcon: {
+    marginTop: 2,
+  },
+  alertBody: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  alertTitle: {
+    color: '#1B1B1B',
+  },
+  alertText: {
+    color: '#1B1B1B',
   },
   sectionHeader: {
     flexDirection: 'row',
