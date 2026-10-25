@@ -85,24 +85,35 @@ export default function ScanScreen() {
   const handleDone = async () => {
     if (!picked || uploading) return;
     setUploading(true);
+    // Tracks which step is running so a failure says where it broke.
+    let stage = 'starting';
     try {
       const { storageId } = await uploadPickedFile({
         uri: picked.uri,
         mimeType: picked.mimeType,
-        generateUploadUrl: () => generateUploadUrl({}),
+        generateUploadUrl: async () => {
+          stage = 'requesting upload URL from Convex';
+          const url = await generateUploadUrl({});
+          stage = 'reading file and uploading to Convex storage';
+          return url;
+        },
       });
+      stage = 'saving the document record';
       const documentId: Id<'documents'> = await createDocument({
         storageId,
         fileName: picked.name,
         mimeType: picked.mimeType,
         kindHint: kind,
       });
+      stage = 'opening review';
       router.replace({ pathname: '/review/[documentId]', params: { documentId } });
-      void runExtraction({ documentId }).catch(() =>
-        Alert.alert('Could not start extraction. Check your connection.'),
+      void runExtraction({ documentId }).catch((error) =>
+        console.warn('[scan] extraction failed to start', error),
       );
-    } catch {
-      Alert.alert('Could not upload. Check your connection.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[scan] failed while ${stage}`, error);
+      Alert.alert('Upload failed', `While ${stage}:\n${message}`);
     } finally {
       setUploading(false);
     }
@@ -115,13 +126,14 @@ export default function ScanScreen() {
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <ThemedText type="smallBold" style={styles.status}>
-            {picked ? `${kindLabel} detected` : 'No document selected yet'}
+            {picked ? `${kindLabel} selected` : 'No document selected yet'}
           </ThemedText>
 
+          {/* Fixed-height box: children fill it absolutely, so the image can never collapse to 0. */}
           {picked ? (
             <View style={styles.preview}>
               {isPdf ? (
-                <View style={[styles.previewImage, styles.pdfPreview]}>
+                <View style={[StyleSheet.absoluteFill, styles.pdfPreview]}>
                   <ThemedText type="heading" style={styles.pdfTitle}>
                     PDF
                   </ThemedText>
@@ -130,7 +142,11 @@ export default function ScanScreen() {
                   </ThemedText>
                 </View>
               ) : (
-                <Image source={picked.uri} style={styles.previewImage} contentFit="cover" />
+                <Image
+                  source={{ uri: picked.uri }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="contain"
+                />
               )}
             </View>
           ) : (
@@ -156,7 +172,8 @@ export default function ScanScreen() {
             <Pressable
               style={({ pressed }) => [styles.done, pressed ? styles.pressed : null]}
               onPress={handleDone}
-              disabled={uploading}>
+              disabled={uploading}
+            >
               <ThemedText type="smallBold" style={styles.doneText}>
                 {uploading ? 'Uploading…' : 'Done'}
               </ThemedText>
@@ -172,7 +189,8 @@ function PickerButton({ label, onPress }: { label: string; onPress: () => void }
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}>
+      style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
+    >
       <ThemedText type="smallBold" style={styles.buttonText}>
         {label}
       </ThemedText>
@@ -189,7 +207,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    flexGrow: 1,
     gap: Spacing.three,
     paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.five,
@@ -198,14 +215,9 @@ const styles = StyleSheet.create({
     color: DETECTED_GREEN,
   },
   preview: {
-    flex: 1,
-    minHeight: 260,
+    height: 360,
     borderRadius: Radius.lg,
     overflow: 'hidden',
-    backgroundColor: '#FBF2DA',
-  },
-  previewImage: {
-    flex: 1,
   },
   previewEmpty: {
     alignItems: 'center',
