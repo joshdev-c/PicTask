@@ -5,8 +5,7 @@ import { v } from 'convex/values';
 import { api } from './_generated/api';
 import { action } from './_generated/server';
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 export const run = action({
   args: { documentId: v.id('documents') },
@@ -14,11 +13,11 @@ export const run = action({
     try {
       const document = await ctx.runQuery(api.documents.get, { documentId: args.documentId });
 
-      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         await ctx.runMutation(api.documents.setFailed, {
           documentId: args.documentId,
-          errorMessage: 'ANTHROPIC_API_KEY is not set',
+          errorMessage: 'GEMINI_API_KEY is not set',
         });
         return { ok: false };
       }
@@ -29,49 +28,46 @@ export const run = action({
       }
       const data = Buffer.from(await blob.arrayBuffer()).toString('base64');
 
-      const fileBlock =
-        document.mimeType === 'application/pdf'
-          ? {
-              type: 'document' as const,
-              source: { type: 'base64' as const, media_type: 'application/pdf', data },
-            }
-          : {
-              type: 'image' as const,
-              source: { type: 'base64' as const, media_type: document.mimeType, data },
-            };
-
       const prompt = `Return JSON only, no markdown. Shape:
 {"title": string, "kind": "document"|"receipt"|"bill"|"form"|"notice", "pageCount": number, "fields": {"amount"?: number, "currency"?: string, "dueAt"?: "YYYY-MM-DD", "accountNo"?: string, "referenceNo"?: string}, "rawText": string, "tasks": [{"title": string, "amount"?: number, "dueAt"?: "YYYY-MM-DD", "sourceQuote"?: string, "sourcePage"?: number, "afterIndex": number|null}]}
 afterIndex points at another task in this array or null. Use PHP and Philippine bill/form conventions when obvious. Kind hint: ${document.kind}.`;
 
-      const response = await fetch(ANTHROPIC_URL, {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-          'content-type': 'application/json',
+      const model = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
+      const response = await fetch(
+        `${GEMINI_API_URL}/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': apiKey,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType: document.mimeType, data } },
+                ],
+              },
+            ],
+            generationConfig: { responseMimeType: 'application/json' },
+          }),
         },
-        body: JSON.stringify({
-          model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
-          max_tokens: 4096,
-          messages: [
-            {
-              role: 'user',
-              content: [fileBlock, { type: 'text', text: prompt }],
-            },
-          ],
-        }),
-      });
+      );
 
-      const body = await response.text();
       if (!response.ok) {
-        throw new Error(`Anthropic API error ${response.status}`);
+        throw new Error(`Gemini API error ${response.status}`);
       }
 
-      const parsed = JSON.parse(body) as { content?: { text?: string }[] };
-      const rawJson = parsed.content?.[0]?.text;
+      const parsed = (await response.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const rawJson = parsed.candidates?.[0]?.content?.parts
+        ?.map((part) => part.text)
+        .filter((text): text is string => Boolean(text))
+        .join('');
       if (!rawJson) {
-        throw new Error('Anthropic response contained no text content');
+        throw new Error('Gemini response contained no text content');
       }
 
       const result = await ctx.runMutation(api.documents.saveExtraction, {

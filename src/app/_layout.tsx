@@ -1,12 +1,13 @@
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { StyleSheet, useColorScheme } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';
+import { AppColorSchemeProvider, useAppColorScheme } from '@/hooks/use-app-color-scheme';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -28,8 +29,15 @@ const convex = convexUrl
   : null;
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const scheme = colorScheme === 'dark' ? 'dark' : 'light';
+  return (
+    <AppColorSchemeProvider>
+      <RootNavigator />
+    </AppColorSchemeProvider>
+  );
+}
+
+function RootNavigator() {
+  const { colorScheme: scheme } = useAppColorScheme();
   const colors = Colors[scheme];
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   // Align the native navigation chrome with the PicTask palette so headers and

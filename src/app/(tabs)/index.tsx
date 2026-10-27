@@ -9,6 +9,7 @@ import { ScanFab } from '@/components/pictask/scan-fab';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
+import { useAppColorScheme } from '@/hooks/use-app-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { api } from '@/lib/api';
 import type { AgendaItem } from '../../../convex/lib/agenda';
@@ -67,6 +68,7 @@ function ConflictBanner({ conflict, onReview }: { conflict: ConflictInfo; onRevi
 export default function TodayScreen() {
   const agenda = useQuery(api.tasks.agenda, {});
   const theme = useTheme();
+  const { colorScheme, toggleColorScheme } = useAppColorScheme();
   const today = new Date().toLocaleDateString('en-PH', {
     weekday: 'long',
     month: 'long',
@@ -89,9 +91,30 @@ export default function TodayScreen() {
                   PicTask
                 </ThemedText>
               </View>
-              <Pressable style={styles.bell} hitSlop={8} onPress={() => router.push('/reminders')}>
-                <Ionicons name="notifications-outline" size={24} color={theme.text} />
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open reminders"
+                  style={styles.iconButton}
+                  hitSlop={8}
+                  onPress={() => router.push('/reminders')}
+                >
+                  <Ionicons name="notifications-outline" size={24} color={theme.text} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Switch to ${colorScheme === 'dark' ? 'light' : 'dark'} mode`}
+                  style={styles.iconButton}
+                  hitSlop={8}
+                  onPress={toggleColorScheme}
+                >
+                  <Ionicons
+                    name={colorScheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
+                    size={24}
+                    color={theme.text}
+                  />
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.titleBlock}>
@@ -190,7 +213,12 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     fontWeight: '700',
   },
-  bell: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  iconButton: {
     width: 50,
     height: 50,
     borderRadius: 25,
