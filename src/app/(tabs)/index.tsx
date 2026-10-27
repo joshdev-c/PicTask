@@ -3,9 +3,15 @@ import { useQuery } from 'convex/react';
 import { router, type ErrorBoundaryProps } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useDerivedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { AgendaCard } from '@/components/pictask/agenda-card';
-import { ScanFab } from '@/components/pictask/scan-fab';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
@@ -69,6 +75,19 @@ export default function TodayScreen() {
   const agenda = useQuery(api.tasks.agenda, {});
   const theme = useTheme();
   const { colorScheme, toggleColorScheme } = useAppColorScheme();
+  const themeProgress = useDerivedValue(() =>
+    withTiming(colorScheme === 'dark' ? 1 : 0, {
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+    }),
+  );
+  const modeIconStyle = useAnimatedStyle(() => ({
+    transform: [
+      { rotate: `${interpolate(themeProgress.value, [0, 1], [0, 180])}deg` },
+      { scale: interpolate(themeProgress.value, [0, 0.5, 1], [1, 0.82, 1]) },
+    ],
+  }));
+
   const today = new Date().toLocaleDateString('en-PH', {
     weekday: 'long',
     month: 'long',
@@ -108,11 +127,13 @@ export default function TodayScreen() {
                   hitSlop={8}
                   onPress={toggleColorScheme}
                 >
-                  <Ionicons
-                    name={colorScheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
-                    size={24}
-                    color={theme.text}
-                  />
+                  <Animated.View style={modeIconStyle}>
+                    <Ionicons
+                      name={colorScheme === 'dark' ? 'sunny-outline' : 'moon-outline'}
+                      size={24}
+                      color={theme.text}
+                    />
+                  </Animated.View>
                 </Pressable>
               </View>
             </View>
@@ -162,7 +183,6 @@ export default function TodayScreen() {
           ) : null}
         </ScrollView>
       </SafeAreaView>
-      <ScanFab />
     </ThemedView>
   );
 }
