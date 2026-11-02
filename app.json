@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "PicTask",
+    "slug": "pictask",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PicTask uses your camera only to scan a document you choose.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PicTask uses selected photos only to create your document task."
+        }
+      ],
+      "expo-local-authentication",
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-sqlite"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "CAMERA",
+        "POST_NOTIFICATIONS",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.pictask.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
