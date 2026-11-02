@@ -3,21 +3,21 @@ import { StyleSheet, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const lightColors = {
-  background: '#F3F7F6', surface: '#FFFFFF', surfaceMuted: '#E5EFEB',
-  primary: '#167568', primaryDark: '#153E38', text: '#183B35', textMuted: '#61766F',
-  border: '#DCE7E2', success: '#28734F', warning: '#94601D', danger: '#B34249', dangerFill: '#A52D38',
-  white: '#FFFFFF', onPrimary: '#FFFFFF', hero: '#DDEFE7', heroBorder: '#C5E0D2',
-  successSurface: '#E3F2E9', warningSurface: '#FAEDD9', blueSurface: '#E1EEF5',
-  input: '#F8FBF9', overlay: 'rgba(9, 27, 24, 0.55)',
+  background: '#F5F4F0', surface: '#FFFFFF', surfaceMuted: '#E8EEF0',
+  primary: '#0B5664', primaryDark: '#12343B', text: '#18282B', textMuted: '#627276',
+  border: '#E4E6E3', success: '#2D7180', warning: '#94601D', danger: '#B34249', dangerFill: '#A52D38',
+  white: '#FFFFFF', onPrimary: '#FFFFFF', hero: '#E5F0F2', heroBorder: '#D3E5E8',
+  successSurface: '#E5F0F2', warningSurface: '#FAEDD9', blueSurface: '#E1EEF5',
+  input: '#FAFAF8', overlay: 'rgba(15, 35, 39, 0.55)',
 };
 export type ThemeColors = typeof lightColors;
 export const darkColors: ThemeColors = {
-  background: '#0D1918', surface: '#162724', surfaceMuted: '#223C35',
-  primary: '#83DBC1', primaryDark: '#E1F7EE', text: '#E6F3ED', textMuted: '#A3BAB0',
-  border: '#30473F', success: '#8FD8AB', warning: '#F0C17C', danger: '#FF9DA4', dangerFill: '#A52D38',
-  white: '#FFFFFF', onPrimary: '#103D32', hero: '#203D33', heroBorder: '#365D4B',
-  successSurface: '#203E30', warningSurface: '#3F3423', blueSurface: '#233B46',
-  input: '#10211D', overlay: 'rgba(0, 0, 0, 0.7)',
+  background: '#101B1F', surface: '#1A292E', surfaceMuted: '#263C43',
+  primary: '#80C4D0', primaryDark: '#D9F0F2', text: '#E9F1F1', textMuted: '#ADC0C3',
+  border: '#344A50', success: '#8CC7D0', warning: '#F0C17C', danger: '#FF9DA4', dangerFill: '#A52D38',
+  white: '#FFFFFF', onPrimary: '#10343A', hero: '#203A40', heroBorder: '#34555E',
+  successSurface: '#203B40', warningSurface: '#3F3423', blueSurface: '#233B46',
+  input: '#132328', overlay: 'rgba(0, 0, 0, 0.7)',
 };
 
 const createLayout = (colors: ThemeColors) => StyleSheet.create({

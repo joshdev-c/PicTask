@@ -2,6 +2,7 @@
   "expo": {
     "name": "PicTask",
     "slug": "pictask",
+    "scheme": "pictask",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,13 +24,16 @@
       "expo-local-authentication",
       "expo-notifications",
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-web-browser"
     ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "blockedPermissions": ["android.permission.RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "permissions": [
         "CAMERA",
         "POST_NOTIFICATIONS",
