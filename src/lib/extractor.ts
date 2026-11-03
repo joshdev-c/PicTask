@@ -60,13 +60,18 @@ const findDueDate = (text: string) => {
 };
 
 const findAmountDue = (text: string) => {
-  const label = '\\b(?:total\\s+)?(?:amount\\s+due|balance\\s+due|amount\\s+payable|total\\s+payable|total\\s+due|amount)\\b';
+  const label = '\\b(?:please\\s+pay(?:\\s+(?:the\\s+)?amount(?:\\s+of)?)?|total\\s+amount\\s+due|total\\s+due|amount\\s+due|balance\\s+due|amount\\s+payable|total\\s+payable|amount)\\b';
   const number = '(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:\\.\\d{1,2})?)';
   const expression = new RegExp(`${label}[\\s:=-]*(?:(?:PHP|P(?=\\s|\\d)|₱)\\s*)?${number}(?![\\d/.-])`, 'i');
   const amountText = matchGroup(text, expression);
-  if (!amountText) return undefined;
-  const amount = Number(amountText.replace(/,/g, ''));
-  return Number.isFinite(amount) ? amount : undefined;
+  if (amountText) {
+    const amount = Number(amountText.replace(/,/g, ''));
+    if (Number.isFinite(amount)) return amount;
+  }
+
+  const decimalAmounts = [...text.matchAll(/(?<![\d.,/-])(\d{1,3}(?:,\d{3})+|\d+)\.(\d{1,2})(?![\d%.,/-])/g)];
+  if (decimalAmounts.length !== 1) return undefined;
+  return Number(decimalAmounts[0][0].replace(/,/g, ''));
 };
 
 export function extractReview(text: string, sourceUri?: string, sourceType: ScanReviewInput['sourceType'] = 'scan'): ScanReviewInput {
