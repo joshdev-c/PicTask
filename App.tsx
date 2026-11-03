@@ -11,11 +11,12 @@ import * as WebBrowser from 'expo-web-browser';
 import Svg, { Path } from 'react-native-svg';
 import { ThemeProvider, useTheme, type ThemeColors } from './src/theme';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NavigationBar } from 'expo-navigation-bar';
 import { ArrowRight, Bell, CalendarDays, Check, ChevronLeft, ChevronRight, Coffee, FileText, House, Moon, Plus, ScanLine, Search, Shield, Sun, UserRound, X } from 'lucide-react-native';
 import type { AppTab, AppUser, DocumentCategory, DocumentRecord, DocumentStatus, RetentionChoice, ScanReviewInput, TaskRecord } from './src/types';
 import { createId, extractReview, makeTasks, maskIdentifier, recommendedTaskTitles } from './src/lib/extractor';
-import { loadLocalRecords, loadMutations, queueMutation, removeLocalRecords, removeLocalTask, removeMutation, saveLocalDocument, saveLocalTask } from './src/lib/db';
-import { deleteRemoteTask, fetchRemoteRecords, supabase, syncDocument, syncTask } from './src/lib/supabase';
+import { loadLocalRecords, loadMutations, queueMutation, removeLocalDocumentAndTasks, removeLocalRecords, removeLocalTask, removeMutation, saveLocalDocument, saveLocalTask } from './src/lib/db';
+import { deleteRemoteDocument, deleteRemoteTask, fetchRemoteRecords, supabase, syncDocument, syncTask } from './src/lib/supabase';
 import { getUpcomingTaskReminders, scheduleTaskReminders } from './src/lib/notifications';
 
 const appIcons = {
@@ -68,33 +69,6 @@ function AnimatedPage({ children, fill = true }: { children: React.ReactNode; fi
   return <Animated.View style={{ flex: fill ? 1 : undefined, gap: 20, opacity: progress, transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }}>{children}</Animated.View>;
 }
 
-function PulseDot({ color }: { color: string }) {
-  const pulse = useRef(new Animated.Value(0)).current;
-  const reduced = useReducedMotion();
-  useEffect(() => {
-    if (reduced) {
-      pulse.setValue(0);
-      return;
-    }
-    const animation = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true }),
-    ]));
-    animation.start();
-    return () => animation.stop();
-  }, [pulse, reduced]);
-  return <View style={stylesForPulse.container} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-    <Animated.View style={[stylesForPulse.ring, { borderColor: color, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) }] }]} />
-    <View style={[stylesForPulse.dot, { backgroundColor: color }]} />
-  </View>;
-}
-
-const stylesForPulse = StyleSheet.create({
-  container: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
-  ring: { position: 'absolute', width: 8, height: 8, borderRadius: 4, borderWidth: 1.5 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-});
-
 function AppHeader({ notificationCount, onNotificationsPress }: { notificationCount: number; onNotificationsPress: () => void }) {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useAppStyles();
@@ -117,8 +91,21 @@ const tabs: Array<{ id: AppTab; icon: AppIconName; label: string }> = [
   { id: 'scan', icon: 'scan-line', label: 'Scan' }, { id: 'vault', icon: 'shield', label: 'Vault' }, { id: 'profile', icon: 'user', label: 'Profile' },
 ];
 const dayLabel = (date?: string) => date ? new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(`${date}T12:00:00`)) : 'No due date';
+const isoDateValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const isPastDate = (value: string) => value < isoDateValue(new Date());
 const peso = (value?: number) => value === undefined ? 'Amount not detected' : value.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' });
 const nowIso = () => new Date().toISOString();
+const isValidIsoDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return false;
+  const [, year, month, day] = match;
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return parsed.getUTCFullYear() === Number(year) && parsed.getUTCMonth() === Number(month) - 1 && parsed.getUTCDate() === Number(day);
+};
+const hasExistingMainTitle = (title: string, records: DocumentRecord[]) => {
+  const normalizedTitle = title.normalize('NFKC').trim().toLocaleLowerCase();
+  return records.some((record) => record.details.title.normalize('NFKC').trim().toLocaleLowerCase() === normalizedTitle);
+};
 const getOAuthCallbackParams = (input: string) => {
   const url = new URL(input, 'https://pictask.invalid');
   const errorCode = url.searchParams.get('errorCode');
@@ -145,7 +132,7 @@ function Button({ label, onPress, kind = 'primary', disabled = false, leading }:
   const animatePress = (toValue: number) => {
     Animated.spring(scale, { toValue, speed: 35, bounciness: 3, useNativeDriver: true }).start();
   };
-  const style = kind === 'primary' ? layout.button : kind === 'secondary' ? layout.secondaryButton : kind === 'danger' ? styles.dangerButton : [layout.secondaryButton, { backgroundColor: isDark ? '#3A444A' : '#E5E7EB', marginTop: -10 }];
+  const style = kind === 'primary' ? layout.button : kind === 'secondary' ? layout.secondaryButton : kind === 'danger' ? styles.dangerButton : [layout.secondaryButton, { backgroundColor: isDark ? '#3A444A' : '#E5E7EB' }];
   const textStyle = kind === 'danger' ? [layout.buttonText, { color: colors.white }] : kind === 'primary' ? layout.buttonText : layout.secondaryButtonText;
   return <Animated.View style={{ transform: [{ scale }] }}><Pressable accessibilityRole="button" accessibilityState={{ disabled, busy: disabled }} disabled={disabled} onPressIn={() => { if (!reduced) animatePress(0.975); }} onPressOut={() => animatePress(1)} onPress={onPress} style={({ pressed }) => [style, leading ? styles.buttonWithLeading : undefined, disabled ? styles.disabled : undefined, pressed ? { opacity: 0.85 } : undefined]}>{leading}<Text style={textStyle}>{label}</Text>{kind === "primary" ? <AppIcon name="arrow-right" size={18} color={colors.onPrimary} /> : null}</Pressable></Animated.View>;
 }
@@ -235,11 +222,15 @@ function CalendarGrid({ tasks, selectedDate, onSelect }: { tasks: TaskRecord[]; 
   })}</View></Card>;
 }
 
-function TaskRow({ task, onToggle, onEdit, compact = false }: { task: TaskRecord; onToggle: () => void; onEdit?: () => void; compact?: boolean }) {
+function TaskRow({ task, onToggle, onOpen, onEdit, compact = false }: { task: TaskRecord; onToggle: () => void; onOpen?: () => void; onEdit?: () => void; compact?: boolean }) {
   const { colors } = useTheme();
   const styles = useAppStyles();
-  return <View style={[styles.taskRow, task.completed && styles.completedRow]}><Pressable accessibilityRole="checkbox" accessibilityLabel={task.title} hitSlop={6} accessibilityState={{ checked: task.completed }} onPress={onToggle} style={[styles.check, task.completed && styles.checked]}>{task.completed ? <AppIcon name="check" size={17} color={colors.onPrimary} /> : null}</Pressable><View style={styles.taskText}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text>{!compact ? <Text style={styles.taskMeta}>{dayLabel(task.dueDate)} · {task.syncState === 'synced' ? 'Synced' : task.syncState === 'local' ? 'Local preview' : 'Waiting to sync'}</Text> : null}</View>{onEdit ? <Pressable onPress={onEdit}><Text style={styles.rowAction}>Edit</Text></Pressable> : null}</View>;
+  return <View style={[styles.taskRow, task.completed && styles.completedRow]}><Pressable accessibilityRole="checkbox" accessibilityLabel={task.title} hitSlop={6} accessibilityState={{ checked: task.completed }} onPress={onToggle} style={[styles.check, task.completed && styles.checked]}>{task.completed ? <AppIcon name="check" size={17} color={colors.onPrimary} /> : null}</Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${onOpen ? 'View' : 'Edit'} task: ${task.title}`} accessibilityHint={onOpen ? 'Opens task details and related tasks' : 'Opens the task editor'} onPress={onOpen ?? onEdit} style={styles.taskText}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text>{!compact ? <Text style={styles.taskMeta}>{dayLabel(task.dueDate)} · {task.syncState === 'synced' ? 'Synced' : task.syncState === 'local' ? 'Local preview' : 'Waiting to sync'}</Text> : null}</Pressable>{onEdit ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit task: ${task.title}`} onPress={onEdit}><Text style={styles.rowAction}>Edit</Text></Pressable> : null}</View>;
 }
+
+type TextInputInstance = React.ElementRef<typeof TextInput>;
+type ScrollViewInstance = React.ElementRef<typeof ScrollView>;
+type ViewInstance = React.ElementRef<typeof View>;
 
 function App() {
   const insets = useSafeAreaInsets();
@@ -251,8 +242,59 @@ function App() {
   const [vaultSearch, setVaultSearch] = useState('');
   const [vaultCategory, setVaultCategory] = useState<DocumentCategory | 'all'>('all');
   const [documents, setDocuments] = useState<DocumentRecord[]>([]); const [tasks, setTasks] = useState<TaskRecord[]>([]); const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [biometricEnabled, setBiometricEnabled] = useState(false); const [syncing, setSyncing] = useState(false); const [review, setReview] = useState<ScanReviewInput | null>(null); const [reviewTasks, setReviewTasks] = useState<TaskRecord[]>([]); const [editTask, setEditTask] = useState<TaskRecord | null>(null); const [newTaskTitle, setNewTaskTitle] = useState(''); const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false); const [syncing, setSyncing] = useState(false); const [review, setReview] = useState<ScanReviewInput | null>(null); const [reviewTasks, setReviewTasks] = useState<TaskRecord[]>([]); const [editTask, setEditTask] = useState<TaskRecord | null>(null); const [taskDetails, setTaskDetails] = useState<TaskRecord | null>(null); const [vaultDocumentDetails, setVaultDocumentDetails] = useState<DocumentRecord | null>(null); const [archiveReview, setArchiveReview] = useState<DocumentRecord | null>(null); const [archiving, setArchiving] = useState(false); const [restoringReviewedTasks, setRestoringReviewedTasks] = useState(false); const [selectedVaultIds, setSelectedVaultIds] = useState<Set<string>>(() => new Set()); const [deleteVaultVisible, setDeleteVaultVisible] = useState(false); const [vaultDeleteFromDetails, setVaultDeleteFromDetails] = useState(false); const [vaultActionBusy, setVaultActionBusy] = useState(false); const [newTaskTitle, setNewTaskTitle] = useState(''); const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
+  const [taskEditErrors, setTaskEditErrors] = useState<Record<string, string>>({});
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [datePickerTarget, setDatePickerTarget] = useState<{ kind: 'review' | 'suggested' | 'newTask' | 'edit'; taskId?: string } | null>(null);
+  const [datePickerMonth, setDatePickerMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const reviewScrollRef = useRef<ScrollViewInstance | null>(null);
+  const editTaskScrollRef = useRef<ScrollViewInstance | null>(null);
+  const validationInputs = useRef<Record<string, TextInputInstance | null>>({});
+  const validationViews = useRef<Record<string, ViewInstance | null>>({});
   const [screenOwnerId, setScreenOwnerId] = useState<string | null>(null);
+
+  const scrollToValidationInput = (field: string, scrollRef: React.RefObject<ScrollViewInstance | null>) => {
+    const input = validationInputs.current[field];
+    const scroll = scrollRef.current;
+    if (!input || !scroll) return;
+    input.measureLayout(
+      scroll,
+      (_x, y) => scroll.scrollTo({ y: Math.max(y - 24, 0), animated: true }),
+      () => input.focus(),
+    );
+  };
+  const scrollToValidationView = (field: string, scrollRef: React.RefObject<ScrollViewInstance | null>) => {
+    const view = validationViews.current[field];
+    const scroll = scrollRef.current;
+    if (!view || !scroll) return;
+    view.measureLayout(scroll, (_x, y) => scroll.scrollTo({ y: Math.max(y - 24, 0), animated: true }));
+  };
+  const openDatePicker = (target: NonNullable<typeof datePickerTarget>, value?: string) => {
+    const date = value && isValidIsoDate(value) ? new Date(`${value}T12:00:00`) : new Date();
+    setDatePickerMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+    setDatePickerTarget(target);
+  };
+  const chooseDate = (value: string) => {
+    if (!datePickerTarget) return;
+    if (datePickerTarget.kind === 'review') {
+      const previousDate = review?.details.dueDate;
+      updateReview({ dueDate: value });
+      setReviewTasks((all) => all.map((task) => task.dueDate === previousDate ? { ...task, dueDate: value } : task));
+      setNewTaskDueDate((current) => !current || current === previousDate ? value : current);
+      setReviewErrors((errors) => ({ ...errors, dueDate: '' }));
+    } else if (datePickerTarget.kind === 'suggested' && datePickerTarget.taskId) {
+      setReviewTasks((all) => all.map((task) => task.id === datePickerTarget.taskId ? { ...task, dueDate: value } : task));
+      setReviewErrors((errors) => ({ ...errors, [`taskDue-${datePickerTarget.taskId}`]: '' }));
+    } else if (datePickerTarget.kind === 'newTask') {
+      setNewTaskDueDate(value);
+      setReviewErrors((errors) => ({ ...errors, newTaskDueDate: '' }));
+    } else if (datePickerTarget.kind === 'edit' && editTask) {
+      setEditTask({ ...editTask, dueDate: value });
+      setTaskEditErrors((errors) => ({ ...errors, dueDate: '' }));
+    }
+    setDatePickerTarget(null);
+  };
 
   // Reset before rendering a new session so a previous screen or modal cannot flash.
   const ownerId = user?.id ?? null;
@@ -260,8 +302,19 @@ function App() {
     setScreenOwnerId(ownerId);
     setTab('home');
     setReview(null);
+    setReviewErrors({});
     setReviewTasks([]);
+    setNewTaskDueDate('');
     setEditTask(null);
+    setTaskEditErrors({});
+    setTaskDetails(null);
+    setArchiveReview(null);
+    setRestoringReviewedTasks(false);
+    setDatePickerTarget(null);
+    setArchiving(false);
+    setSelectedVaultIds(new Set());
+    setDeleteVaultVisible(false);
+    setVaultActionBusy(false);
     setNewTaskTitle('');
     setNotificationsVisible(false);
   }
@@ -272,7 +325,7 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const flushPending = async (ownerId: string) => { if (!supabase) return; for (const mutation of await loadMutations(ownerId)) { try { if (mutation.operation === 'upsert' && mutation.entity === 'document') await syncDocument(JSON.parse(mutation.payload) as DocumentRecord); if (mutation.operation === 'upsert' && mutation.entity === 'task') await syncTask(JSON.parse(mutation.payload) as TaskRecord); if (mutation.operation === 'delete' && mutation.entity === 'task') await deleteRemoteTask(JSON.parse(mutation.payload).id); await removeMutation(mutation.id); } catch { break; } } };
+  const flushPending = async (ownerId: string) => { if (!supabase) return; for (const mutation of await loadMutations(ownerId)) { try { if (mutation.operation === 'upsert' && mutation.entity === 'document') await syncDocument(JSON.parse(mutation.payload) as DocumentRecord); if (mutation.operation === 'upsert' && mutation.entity === 'task') await syncTask(JSON.parse(mutation.payload) as TaskRecord); if (mutation.operation === 'delete' && mutation.entity === 'task') await deleteRemoteTask(JSON.parse(mutation.payload).id); if (mutation.operation === 'delete' && mutation.entity === 'document') await deleteRemoteDocument(JSON.parse(mutation.payload) as DocumentRecord); await removeMutation(mutation.id); } catch { break; } } };
   const loadRecords = async (ownerId: string, preview: boolean) => { const local = await loadLocalRecords(ownerId); setDocuments(local.documents); setTasks(local.tasks); if (!preview && supabase) try { await flushPending(ownerId); const remote = await fetchRemoteRecords(ownerId); if (remote) { setDocuments(remote.documents); setTasks(remote.tasks); await Promise.all(remote.documents.map(saveLocalDocument)); await Promise.all(remote.tasks.map(saveLocalTask)); } } catch { /* local cache stays available offline */ } };
   useEffect(() => { if (user) void loadRecords(user.id, user.preview); else { setDocuments([]); setTasks([]); } }, [user?.id]);
   useEffect(() => {
@@ -283,26 +336,172 @@ function App() {
   const persistTask = async (record: TaskRecord) => { await saveLocalTask(record); if (!user || user.preview || !supabase) return { ...record, syncState: 'local' as const }; try { await syncTask(record); return { ...record, syncState: 'synced' as const }; } catch { await queueMutation({ id: createId('mutation'), ownerId: record.ownerId, entity: 'task', operation: 'upsert', payload: JSON.stringify(record), localTimestamp: nowIso(), retryCount: 0 }); return { ...record, syncState: 'failed' as const }; } };
   const syncAll = async () => { if (!user || user.preview || !supabase) return; setSyncing(true); await Promise.all(documents.map(async (record) => { const saved = await persistDocument({ ...record, syncState: 'pending' }); setDocuments((all) => all.map((item) => item.id === record.id ? saved : item)); })); await Promise.all(tasks.map(async (record) => { const saved = await persistTask({ ...record, syncState: 'pending' }); setTasks((all) => all.map((item) => item.id === record.id ? saved : item)); })); setSyncing(false); };
   const openVault = async () => { if (biometricEnabled && await LocalAuthentication.hasHardwareAsync()) { const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock your PicTask Vault', disableDeviceFallback: false }); if (!result.success) return; } setTab('vault'); };
-  const changeTab = (next: AppTab) => { if (next === 'vault') void openVault(); else setTab(next); };
-  const startManual = () => { const input: ScanReviewInput = { sourceType: 'manual', category: 'general', confidence: 'manual', retention: 'details_only', details: { title: 'New task', provider: '', retainFullIdentifier: false } }; setReview(input); setReviewTasks([]); };
-  const scanImage = async (mode: 'camera' | 'photo') => { const permission = mode === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { Alert.alert('Permission needed', `Please allow ${mode === 'camera' ? 'camera' : 'photo'} access to scan a document you choose.`); return; } const result = mode === 'camera' ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 }); if (result.canceled) return; const uri = result.assets[0].uri; try { const recognized = await TextRecognition.recognize(uri); const draft = extractReview(recognized.text, uri, mode === 'camera' ? 'scan' : 'photo'); setReview(draft); setReviewTasks(makeTasks(user?.id ?? 'local-user', 'draft', draft.category, draft.details.dueDate, draft.details.amountDue)); } catch { const draft = extractReview('', uri, mode === 'camera' ? 'scan' : 'photo'); draft.confidence = 'low'; setReview(draft); setReviewTasks(makeTasks(user?.id ?? 'local-user', 'draft', draft.category)); Alert.alert('Review required', 'Text could not be read automatically. You can enter details manually. OCR requires an Android development build.'); } };
+  const changeTab = (next: AppTab) => { if (next === 'vault') void openVault(); else { setSelectedVaultIds(new Set()); setTab(next); } };
+  const startManual = () => { const input: ScanReviewInput = { sourceType: 'manual', category: 'general', confidence: 'manual', retention: 'details_only', details: { title: 'New task', provider: '', retainFullIdentifier: false } }; setReview(input); setReviewErrors({}); setReviewTasks([]); setNewTaskDueDate(''); };
+  const scanImage = async (mode: 'camera' | 'photo') => { const permission = mode === 'camera' ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { Alert.alert('Permission needed', `Please allow ${mode === 'camera' ? 'camera' : 'photo'} access to scan a document you choose.`); return; } const result = mode === 'camera' ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 }) : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 }); if (result.canceled) return; const uri = result.assets[0].uri; try { const recognized = await TextRecognition.recognize(uri); const draft = extractReview(recognized.text, uri, mode === 'camera' ? 'scan' : 'photo'); setReviewErrors({}); setReview(draft); setNewTaskDueDate(draft.details.dueDate ?? ''); setReviewTasks(makeTasks(user?.id ?? 'local-user', 'draft', draft.category, draft.details.dueDate, draft.details.amountDue)); } catch { const draft = extractReview('', uri, mode === 'camera' ? 'scan' : 'photo'); draft.confidence = 'low'; setReviewErrors({}); setReview(draft); setNewTaskDueDate(''); setReviewTasks(makeTasks(user?.id ?? 'local-user', 'draft', draft.category)); Alert.alert('Review required', 'Text could not be read automatically. You can enter details manually. OCR requires an Android development build.'); } };
   const updateReview = (change: Partial<ScanReviewInput['details']>) => setReview((current) => current ? { ...current, details: { ...current.details, ...change } } : current);
   const changeCategory = (category: DocumentCategory) => { setReview((current) => current ? { ...current, category } : current); setReviewTasks((current) => current.map((task, index) => ({ ...task, title: recommendedTaskTitles(category, review?.details.amountDue)[index] ?? task.title, recommendationSource: category === 'bill' ? 'bill_rule' : category === 'deadline' ? 'deadline_rule' : 'general_rule' }))); };
-  const addDraftTask = () => { if (!newTaskTitle.trim() || !user) return; setReviewTasks((current) => [...current, { id: createId('task'), ownerId: user.id, documentId: 'draft', position: current.length, title: newTaskTitle.trim(), dueDate: review?.details.dueDate, completed: false, recommendationSource: 'manual', reminderDays: [7, 3, 1], syncState: 'pending', createdAt: nowIso(), updatedAt: nowIso() }]); setNewTaskTitle(''); };
-  const saveReview = async () => { if (!review || !user) return; const id = createId('document'); const timestamp = nowIso(); const cleanDetails = { ...review.details }; delete cleanDetails.rawText; if (cleanDetails.accountNumber && !cleanDetails.retainFullIdentifier) cleanDetails.accountNumber = cleanDetails.accountNumber.slice(-4); const document: DocumentRecord = { id, ownerId: user.id, sourceType: review.sourceType, category: review.category, details: cleanDetails, retention: review.retention, sourceUri: review.retention === 'image_and_details' ? review.sourceUri : undefined, status: 'active', syncState: user.preview ? 'local' : 'pending', createdAt: timestamp, updatedAt: timestamp }; const nextTasks = reviewTasks.map((task, position) => ({ ...task, documentId: id, ownerId: user.id, position, dueDate: task.dueDate ?? document.details.dueDate, updatedAt: timestamp })); const savedDocument = await persistDocument(document); const savedTasks = await Promise.all(nextTasks.map(persistTask)); setDocuments((all) => [savedDocument, ...all]); setTasks((all) => [...all, ...savedTasks]); for (const task of savedTasks) void scheduleTaskReminders(task); if (review.sourceUri && review.retention !== 'image_and_details') try { await FileSystem.deleteAsync(review.sourceUri, { idempotent: true }); } catch { /* gallery provider may own the original */ } setReview(null); setReviewTasks([]); setTab('home'); };
+  const addDraftTask = () => {
+    if (!user) return;
+    if (!newTaskTitle.trim()) {
+      setReviewErrors((errors) => ({ ...errors, newTask: 'Enter a title before adding this task.' }));
+      scrollToValidationInput('newTask', reviewScrollRef);
+      return;
+    }
+    setReviewErrors((errors) => ({ ...errors, newTask: '' }));
+    if (!newTaskDueDate || !isValidIsoDate(newTaskDueDate) || isPastDate(newTaskDueDate)) { setReviewErrors((errors) => ({ ...errors, newTaskDueDate: 'Choose today or a future date.' })); scrollToValidationView('newTaskDueDate', reviewScrollRef); return; }
+    setReviewTasks((current) => [...current, { id: createId('task'), ownerId: user.id, documentId: 'draft', position: current.length, title: newTaskTitle.trim(), dueDate: newTaskDueDate, completed: false, recommendationSource: 'manual', reminderDays: [7, 3, 1], syncState: 'pending', createdAt: nowIso(), updatedAt: nowIso() }]);
+    setNewTaskTitle('');
+  };
+  const saveReview = async () => {
+    if (!review || !user) return;
+    const errors: Record<string, string> = {};
+    if (!review.details.title.trim()) errors.title = 'Enter a title.';
+    else if (hasExistingMainTitle(review.details.title, documents)) errors.title = 'This main title already exists. Choose a different title.';
+    if (!review.details.dueDate || !isValidIsoDate(review.details.dueDate)) errors.dueDate = 'Choose a valid due date.';
+    else if (isPastDate(review.details.dueDate)) errors.dueDate = 'Choose today or a future date.';
+    const emptyTask = reviewTasks.find((task) => !task.title.trim());
+    if (emptyTask) errors[`task-${emptyTask.id}`] = 'Enter a task title or remove this task.';
+    const taskWithoutDate = reviewTasks.find((task) => !task.dueDate || !isValidIsoDate(task.dueDate));
+    if (taskWithoutDate) errors[`taskDue-${taskWithoutDate.id}`] = 'Choose a valid due date for this task.';
+    else {
+      const taskWithPastDate = reviewTasks.find((task) => task.dueDate && isPastDate(task.dueDate));
+      if (taskWithPastDate) errors[`taskDue-${taskWithPastDate.id}`] = 'Choose today or a future date for this task.';
+    }
+    setReviewErrors(errors);
+    const taskWithDateError = reviewTasks.find((task) => errors[`taskDue-${task.id}`]);
+    const invalidField = errors.title ? 'title' : errors.dueDate ? 'dueDate' : emptyTask ? `task-${emptyTask.id}` : taskWithoutDate || taskWithDateError ? `taskDue-${(taskWithoutDate ?? taskWithDateError)?.id}` : undefined;
+    if (invalidField) {
+      if (invalidField.startsWith('taskDue-')) scrollToValidationView(invalidField, reviewScrollRef);
+      else scrollToValidationInput(invalidField, reviewScrollRef);
+      return;
+    }
+    const id = createId('document'); const timestamp = nowIso(); const cleanDetails = { ...review.details, title: review.details.title.trim(), dueDate: review.details.dueDate?.trim() }; delete cleanDetails.rawText; if (cleanDetails.accountNumber && !cleanDetails.retainFullIdentifier) cleanDetails.accountNumber = cleanDetails.accountNumber.slice(-4); const document: DocumentRecord = { id, ownerId: user.id, sourceType: review.sourceType, category: review.category, details: cleanDetails, retention: review.retention, sourceUri: review.retention === 'image_and_details' ? review.sourceUri : undefined, status: 'active', syncState: user.preview ? 'local' : 'pending', createdAt: timestamp, updatedAt: timestamp }; const nextTasks = reviewTasks.map((task, position) => ({ ...task, title: task.title.trim(), documentId: id, ownerId: user.id, position, dueDate: task.dueDate ?? document.details.dueDate, updatedAt: timestamp }));     const savedDocument = await persistDocument(document); const savedTasks = await Promise.all(nextTasks.map(persistTask)); setDocuments((all) => [savedDocument, ...all]); setTasks((all) => [...all, ...savedTasks]); for (const task of savedTasks) void scheduleTaskReminders(task); if (review.sourceUri && review.retention !== 'image_and_details') try { await FileSystem.deleteAsync(review.sourceUri, { idempotent: true }); } catch { /* gallery provider may own the original */ } setReview(null); setReviewErrors({}); setReviewTasks([]); setNewTaskDueDate(''); setTab('home');
+  };
   const toggleTask = async (task: TaskRecord) => { const next = { ...task, completed: !task.completed, updatedAt: nowIso(), syncState: user?.preview ? 'local' as const : 'pending' as const }; const saved = await persistTask(next); setTasks((all) => all.map((item) => item.id === task.id ? saved : item)); };
-  const saveEditedTask = async () => { if (!editTask) return; const saved = await persistTask({ ...editTask, updatedAt: nowIso(), syncState: user?.preview ? 'local' : 'pending' }); setTasks((all) => all.map((item) => item.id === saved.id ? saved : item)); setEditTask(null); if (!saved.completed) void scheduleTaskReminders(saved); };
+  const saveEditedTask = async () => {
+    if (!editTask) return;
+    const errors: Record<string, string> = {};
+    if (!editTask.title.trim()) errors.title = 'Enter a task title.';
+    if (!editTask.dueDate || !isValidIsoDate(editTask.dueDate)) errors.dueDate = 'Enter a valid date in YYYY-MM-DD format.';
+    setTaskEditErrors(errors);
+    const invalidField = errors.title ? 'editTitle' : errors.dueDate ? 'editDueDate' : undefined;
+    if (invalidField) {
+      if (invalidField === 'editDueDate') scrollToValidationView(invalidField, editTaskScrollRef);
+      else scrollToValidationInput(invalidField, editTaskScrollRef);
+      return;
+    }
+    const saved = await persistTask({ ...editTask, title: editTask.title.trim(), dueDate: editTask.dueDate?.trim(), updatedAt: nowIso(), syncState: user?.preview ? 'local' : 'pending' }); setTasks((all) => all.map((item) => item.id === saved.id ? saved : item)); setEditTask(null); setTaskEditErrors({}); if (!saved.completed) void scheduleTaskReminders(saved);
+  };
   const deleteTask = async (task: TaskRecord) => { await removeLocalTask(task.id); setTasks((all) => all.filter((item) => item.id !== task.id)); setEditTask(null); if (!user || user.preview || !supabase) return; try { await deleteRemoteTask(task.id); } catch { await queueMutation({ id: createId('mutation'), ownerId: task.ownerId, entity: 'task', operation: 'delete', payload: JSON.stringify({ id: task.id }), localTimestamp: nowIso(), retryCount: 0 }); } };
-  const archiveDocument = async (document: DocumentRecord) => { const saved = await persistDocument({ ...document, status: 'archived' as DocumentStatus, archivedAt: nowIso(), updatedAt: nowIso(), syncState: user?.preview ? 'local' : 'pending' }); setDocuments((all) => all.map((item) => item.id === saved.id ? saved : item)); };
+  const archiveDocument = async (document: DocumentRecord) => { const timestamp = nowIso(); const saved = await persistDocument({ ...document, status: 'archived' as DocumentStatus, archivedAt: timestamp, updatedAt: timestamp, syncState: user?.preview ? 'local' : 'pending' }); setDocuments((all) => all.map((item) => item.id === saved.id ? saved : item)); };
+  const confirmArchive = async () => {
+    if (!archiveReview) return;
+    setArchiving(true);
+    try {
+      await archiveDocument(archiveReview);
+      setArchiveReview(null);
+    } catch (error) {
+      Alert.alert('Could not move to Vault', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setArchiving(false);
+    }
+  };
+  const restoreReviewedTasks = async () => {
+    if (!archiveReview) return;
+    const completedTasks = tasks.filter((task) => task.documentId === archiveReview.id && task.completed);
+    if (!completedTasks.length) {
+      setArchiveReview(null);
+      return;
+    }
+    setRestoringReviewedTasks(true);
+    const failedTaskTitles: string[] = [];
+    for (const task of completedTasks) {
+      try {
+        const restored = await persistTask({
+          ...task,
+          completed: false,
+          updatedAt: nowIso(),
+          syncState: user?.preview ? 'local' : 'pending',
+        });
+        setTasks((all) => all.map((item) => item.id === restored.id ? restored : item));
+        void scheduleTaskReminders(restored);
+      } catch {
+        failedTaskTitles.push(task.title);
+      }
+    }
+    setRestoringReviewedTasks(false);
+    if (failedTaskTitles.length) {
+      Alert.alert('Could not restore all tasks', `Restored ${completedTasks.length - failedTaskTitles.length} of ${completedTasks.length} tasks. Please try again for: ${failedTaskTitles.join(', ')}.`);
+      return;
+    }
+    setArchiveReview(null);
+  };
   const restoreDocument = async (document: DocumentRecord) => { const saved = await persistDocument({ ...document, status: 'active' as DocumentStatus, archivedAt: undefined, updatedAt: nowIso(), syncState: user?.preview ? 'local' : 'pending' }); setDocuments((all) => all.map((item) => item.id === saved.id ? saved : item)); };
-  const activeDocuments = documents.filter((document) => document.status === 'active'); const activeTasks = tasks.filter((task) => activeDocuments.some((document) => document.id === task.documentId)); const sortByDeadline = (a: TaskRecord, b: TaskRecord) => Number(a.completed) - Number(b.completed) || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'); const nextTasks = [...activeTasks].filter((task) => !task.completed).sort(sortByDeadline); const upcomingReminders = getUpcomingTaskReminders(nextTasks); const tasksForSelectedDay = activeTasks.filter((task) => task.dueDate === selectedDate).sort(sortByDeadline); const readyToArchive = activeDocuments.filter((document) => { const documentTasks = tasks.filter((task) => task.documentId === document.id); return documentTasks.length > 0 && documentTasks.every((task) => task.completed); });
+  const restoreSelectedVaultRecords = async () => {
+    const selected = documents.filter((document) => selectedVaultIds.has(document.id) && document.status === 'archived');
+    if (!selected.length) return;
+    setVaultActionBusy(true);
+    const failedIds = new Set<string>();
+    for (const document of selected) {
+      try {
+        await restoreDocument(document);
+      } catch {
+        failedIds.add(document.id);
+      }
+    }
+    setSelectedVaultIds(failedIds);
+    setVaultActionBusy(false);
+    if (failedIds.size) Alert.alert('Could not restore all records', `${selected.length - failedIds.size} restored. Please try the remaining record${failedIds.size === 1 ? '' : 's'} again.`);
+  };
+  const restoreVaultDocumentDetails = async () => {
+    if (!vaultDocumentDetails) return;
+    setVaultActionBusy(true);
+    try {
+      await restoreDocument(vaultDocumentDetails);
+      setVaultDocumentDetails(null);
+    } catch (error) {
+      Alert.alert('Could not restore record', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setVaultActionBusy(false);
+    }
+  };
+  const deleteSelectedVaultRecords = async () => {
+    const selected = documents.filter((document) => selectedVaultIds.has(document.id) && document.status === 'archived');
+    if (!selected.length || !user) return;
+    setVaultActionBusy(true);
+    const failedIds = new Set<string>();
+    for (const document of selected) {
+      try {
+        if (!user.preview && supabase) {
+          try {
+            await deleteRemoteDocument(document);
+          } catch {
+            await queueMutation({ id: createId('mutation'), ownerId: document.ownerId, entity: 'document', operation: 'delete', payload: JSON.stringify(document), localTimestamp: nowIso(), retryCount: 0 });
+          }
+        }
+        await removeLocalDocumentAndTasks(document.id);
+        setDocuments((all) => all.filter((item) => item.id !== document.id));
+        setTasks((all) => all.filter((task) => task.documentId !== document.id));
+      } catch {
+        failedIds.add(document.id);
+      }
+    }
+    setSelectedVaultIds(failedIds);
+    setDeleteVaultVisible(false);
+    setVaultDeleteFromDetails(false);
+    setVaultActionBusy(false);
+    if (failedIds.size) Alert.alert('Could not delete all records', `${selected.length - failedIds.size} deleted. Please try the remaining record${failedIds.size === 1 ? '' : 's'} again.`);
+  };
+  const activeDocuments = documents.filter((document) => document.status === 'active'); const activeTasks = tasks.filter((task) => activeDocuments.some((document) => document.id === task.documentId)); const sortByDeadline = (a: TaskRecord, b: TaskRecord) => Number(a.completed) - Number(b.completed) || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'); const nextTasks = [...activeTasks].filter((task) => !task.completed).sort(sortByDeadline); const upcomingReminders = getUpcomingTaskReminders(nextTasks); const tasksForSelectedDay = activeTasks.filter((task) => task.dueDate === selectedDate).sort(sortByDeadline); const readyToArchive = activeDocuments.filter((document) => { const documentTasks = tasks.filter((task) => task.documentId === document.id); return documentTasks.length > 0 && documentTasks.every((task) => task.completed); }); const selectedTask = taskDetails ? tasks.find((task) => task.id === taskDetails.id) ?? taskDetails : null; const selectedTaskDocument = selectedTask ? documents.find((document) => document.id === selectedTask.documentId) : undefined; const tasksInSelectedPlan = selectedTask ? tasks.filter((task) => task.documentId === selectedTask.documentId).sort((a, b) => a.position - b.position) : [];
+  const selectedArchivedVaultDocuments = documents.filter((document) => document.status === 'archived' && selectedVaultIds.has(document.id));
   const toggleBiometric = async (next: boolean) => { if (next) { if (!(await LocalAuthentication.hasHardwareAsync())) { Alert.alert('Not available', 'This device does not offer biometric or device-credential authentication.'); return; } const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Confirm Vault protection', disableDeviceFallback: false }); if (!result.success) return; } setBiometricEnabled(next); await SecureStore.setItemAsync('pictask.biometric', String(next)); };
   const exportData = async () => { await Share.share({ title: 'PicTask export', message: JSON.stringify({ exportedAt: nowIso(), documents, tasks }, null, 2) }); };
   const resetPassword = async () => { if (!supabase || !user || user.preview) return; const { error } = await supabase.auth.resetPasswordForEmail(user.email); Alert.alert(error ? 'Could not send email' : 'Email sent', error?.message ?? 'Check your inbox for password-reset instructions.'); };
   const deleteAccount = () => Alert.alert('Delete account?', 'This permanently removes your app records, optional vault images, and local cache.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { void (async () => { if (!user) return; await removeLocalRecords(user.id); if (supabase && !user.preview) { await supabase.functions.invoke('delete-account'); await supabase.auth.signOut(); } setUser(null); })(); } }]);
   const signOut = async () => { if (supabase && !user?.preview) await supabase.auth.signOut(); setUser(null); };
-  if (!ready || !startupComplete) return <View style={[layout.screen, styles.startupScreen]}><StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} /><View style={styles.startupBrand}><View style={styles.startupMark}><AppIcon name="check" size={28} color={colors.onPrimary} /></View><Text style={styles.startupName}>PicTask</Text></View>{reducedMotion ? <View style={styles.startupStaticIndicator} /> : <ActivityIndicator accessibilityLabel="Loading PicTask" size="small" color={colors.primary} style={styles.startupIndicator} />}<Text style={styles.startupMessage}>Getting things ready for you...</Text></View>;
-  if (!user) return <AuthScreen onPreview={() => setUser({ id: 'local-preview', email: 'Local preview', preview: true })} />;
+  if (!ready || !startupComplete) return <View style={[layout.screen, styles.startupScreen]}><NavigationBar style={isDark ? 'dark' : 'light'} /><StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} /><View style={styles.startupBrand}><View style={styles.startupMark}><AppIcon name="check" size={28} color={colors.onPrimary} /></View><Text style={styles.startupName}>PicTask</Text></View>{reducedMotion ? <View style={styles.startupStaticIndicator} /> : <ActivityIndicator accessibilityLabel="Loading PicTask" size="small" color={colors.primary} style={styles.startupIndicator} />}<Text style={styles.startupMessage}>Getting things ready for you...</Text></View>;
+  if (!user) return <><NavigationBar style={isDark ? 'dark' : 'light'} /><AuthScreen onPreview={() => setUser({ id: 'local-preview', email: 'Local preview', preview: true })} /></>;
 
   const renderHome = () => <ScrollView contentContainerStyle={layout.content}>
     <AppHeader notificationCount={upcomingReminders.length} onNotificationsPress={() => setNotificationsVisible(true)} />
@@ -316,20 +515,94 @@ function App() {
       </Text>
     </View>
     {user.preview ? <Card style={styles.previewCard}><Pill text="Local preview" tone="warning" /><Text style={layout.body}>A space to try things out. Your preview stays on this device.</Text></Card> : null}
-    <Card style={styles.heroCard}>
-      <View style={styles.sectionHeader}><Text style={styles.heroEyebrow}>YOUR NEXT STEP</Text><PulseDot color={isDark ? '#9BC9A5' : '#4F805A'} /></View>
-      {nextTasks[0] ? <><Text style={styles.heroTitle}>{nextTasks[0].title}</Text><Text style={styles.heroDetail}>{dayLabel(nextTasks[0].dueDate)}</Text><Button label="Mark complete" onPress={() => void toggleTask(nextTasks[0])} /></> : <><Text style={styles.heroTitle}>You are all caught up.</Text><Text style={styles.heroDetail}>Scan a notice or create a task when you are ready.</Text><Button label="Create a task" onPress={startManual} /></>}
-    </Card>
-    {readyToArchive.length ? <><Text style={layout.heading}>Ready for Vault</Text>{readyToArchive.map((document) => <Card key={document.id}><Text style={layout.heading}>{document.details.title}</Text><Text style={layout.subtitle}>All tasks are complete. Review before archiving.</Text><Button label="Review and move to Vault" onPress={() => void archiveDocument(document)} /></Card>)}</> : null}
+    {readyToArchive.length ? <><Text style={layout.heading}>Ready for Vault</Text>{readyToArchive.map((document) => <Card key={document.id}><Text style={layout.heading}>{document.details.title}</Text><Text style={layout.subtitle}>All tasks are complete. Review the record before moving it to your Vault.</Text><Button label="Review record" onPress={() => setArchiveReview(document)} /></Card>)}</> : null}
     <View style={styles.sectionHeader}><Text style={layout.heading}>Upcoming</Text><Pressable onPress={() => setTab('calendar')}><Text style={styles.link}>View calendar</Text></Pressable></View>
-    {nextTasks.slice(0, 4).map((task) => <Card key={task.id}><TaskRow task={task} onToggle={() => void toggleTask(task)} /></Card>)}
+    {nextTasks.slice(0, 4).map((task) => <Card key={task.id}><TaskRow task={task} onToggle={() => void toggleTask(task)} onOpen={() => setTaskDetails(task)} /></Card>)}
     {!nextTasks.length ? <Card style={styles.emptyCard}><View style={styles.previewIcon}><AppIcon name="coffee" size={26} color={colors.primary} /></View><Text style={layout.heading}>A little breathing room.</Text><Text style={styles.emptyText}>Your upcoming tasks will find a home here. Start by scanning your first document.</Text><Button label="Scan a document" kind="secondary" onPress={() => setTab("scan")} /></Card> : null}
   </ScrollView>;
-  const renderCalendar = () => <ScrollView contentContainerStyle={layout.content}><View><Text style={layout.title}>Calendar</Text><Text style={layout.subtitle}>Choose a day to see its planned actions.</Text></View><CalendarGrid tasks={activeTasks} selectedDate={selectedDate} onSelect={setSelectedDate} /><View style={styles.sectionHeader}><View><Text style={layout.heading}>{dayLabel(selectedDate)}</Text><Text style={layout.subtitle}>Tasks for this date</Text></View><Pill text={`${tasksForSelectedDay.length} task${tasksForSelectedDay.length === 1 ? '' : 's'}`} tone="blue" /></View>{tasksForSelectedDay.map((task) => <Card key={task.id}><TaskRow task={task} onToggle={() => void toggleTask(task)} onEdit={() => setEditTask(task)} /></Card>)}{!tasksForSelectedDay.length ? <Card><Text style={layout.body}>No tasks are scheduled for this date.</Text><Button label="Create a task" kind="secondary" onPress={startManual} /></Card> : null}</ScrollView>;
+  const renderCalendar = () => <ScrollView contentContainerStyle={layout.content}><View><Text style={layout.title}>Calendar</Text><Text style={layout.subtitle}>Choose a day to see its planned actions.</Text></View><CalendarGrid tasks={activeTasks} selectedDate={selectedDate} onSelect={setSelectedDate} /><View style={styles.sectionHeader}><View><Text style={layout.heading}>{dayLabel(selectedDate)}</Text><Text style={layout.subtitle}>Tasks for this date</Text></View><Pill text={`${tasksForSelectedDay.length} task${tasksForSelectedDay.length === 1 ? '' : 's'}`} tone="blue" /></View>{tasksForSelectedDay.map((task) => <Card key={task.id}><TaskRow task={task} onToggle={() => void toggleTask(task)} onEdit={() => { setTaskEditErrors({}); setEditTask(task); }} /></Card>)}{!tasksForSelectedDay.length ? <Card><Text style={layout.body}>No tasks are scheduled for this date.</Text><Button label="Create a task" kind="secondary" onPress={startManual} /></Card> : null}</ScrollView>;
   const renderScanStart = () => <ScrollView contentContainerStyle={layout.content}><View><Text style={layout.title}>Create a plan</Text><Text style={layout.subtitle}>Scan a bill, import a notice, or start with a manual task.</Text></View><Card style={styles.scanFeature}><AppIcon name="file-text" size={36} color={colors.primary} /><Text style={layout.heading}>Your document stays in your control</Text><Text style={layout.subtitle}>Text recognition runs on your Android device. You review every detail before saving.</Text></Card><Button label="Scan document" onPress={() => void scanImage('camera')} /><Button label="Import photo" kind="secondary" onPress={() => void scanImage('photo')} /><Button label="Create task manually" kind="secondary" onPress={startManual} /><Card><Text style={layout.label}>Privacy default</Text><Text style={layout.body}>Scans save as reviewed details only unless you explicitly choose to retain the original image.</Text></Card></ScrollView>;
-  const renderReview = () => { if (!review) return null; const identifier = review.details.accountNumber; return <ScrollView contentContainerStyle={layout.content} keyboardShouldPersistTaps="handled"><View style={styles.sectionHeader}><View><Text style={layout.title}>Review details</Text><Text style={layout.subtitle}>{review.confidence === 'high' ? 'Check the detected fields before creating tasks.' : 'Add the missing details to make this plan useful.'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close review" hitSlop={10} onPress={() => setReview(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable></View>{review.sourceUri ? <Image source={{ uri: review.sourceUri }} style={styles.previewImage} /> : null}<Card><Text style={layout.label}>Document type</Text><View style={styles.choiceRow}>{(['bill', 'deadline', 'general'] as DocumentCategory[]).map((category) => <Pressable key={category} onPress={() => changeCategory(category)} style={[styles.choice, review.category === category && styles.choiceSelected]}><Text style={[styles.choiceText, review.category === category && styles.choiceTextSelected]}>{category === 'bill' ? 'Bill' : category === 'deadline' ? 'Deadline' : 'General'}</Text></Pressable>)}</View><Text style={layout.label}>Title</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={review.details.title} onChangeText={(title) => updateReview({ title })} placeholder="Task title" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Provider or source</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={review.details.provider} onChangeText={(provider) => updateReview({ provider })} placeholder="Meralco, school, employer…" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Amount due</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} keyboardType="decimal-pad" value={review.details.amountDue?.toString() ?? ''} onChangeText={(value) => updateReview({ amountDue: value ? Number(value.replace(/,/g, '')) : undefined })} placeholder="e.g. 1520.50" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Due date</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={review.details.dueDate ?? ''} onChangeText={(dueDate) => updateReview({ dueDate })} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Billing period</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={review.details.billingPeriod ?? ''} onChangeText={(billingPeriod) => updateReview({ billingPeriod })} placeholder="Optional" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Account/reference number</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={review.details.accountNumber ?? ''} onChangeText={(accountNumber) => updateReview({ accountNumber })} placeholder="Optional" placeholderTextColor={colors.textMuted} />{identifier ? <View style={styles.inline}><Pill text={maskIdentifier(identifier)} /><Text style={styles.smallNote}>Masked in the app by default.</Text></View> : null}<View style={styles.switchRow}><View style={styles.grow}><Text style={layout.body}>Retain full identifier</Text><Text style={layout.subtitle}>Only enable if you need it for payment reference.</Text></View><Switch value={review.details.retainFullIdentifier} onValueChange={(retainFullIdentifier) => updateReview({ retainFullIdentifier })} trackColor={{ true: colors.primary }} /></View></Card><Card><Text style={layout.heading}>Keep the original image?</Text><Text style={layout.subtitle}>Details only is selected by default.</Text>{(['details_only', 'image_and_details', 'discard_after_task'] as RetentionChoice[]).map((retention) => <Pressable key={retention} onPress={() => setReview({ ...review, retention })} style={[styles.retentionOption, review.retention === retention && styles.retentionSelected]}><Text style={styles.retentionTitle}>{retention === 'details_only' ? 'Save reviewed details only' : retention === 'image_and_details' ? 'Save image and reviewed details' : 'Discard image after task creation'}</Text><Text style={layout.subtitle}>{retention === 'details_only' ? 'Original image is not kept.' : retention === 'image_and_details' ? 'Stored privately in your Vault.' : 'Creates tasks but keeps no source record.'}</Text></Pressable>)}</Card><Card><Text style={layout.heading}>Suggested tasks</Text><Text style={layout.subtitle}>Edit, remove, or reorder these before saving.</Text>{reviewTasks.map((task, index) => <View key={task.id} style={styles.draftTask}><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={[layout.input, styles.grow]} value={task.title} onChangeText={(title) => setReviewTasks((all) => all.map((item) => item.id === task.id ? { ...item, title } : item))} /><Pressable onPress={() => setReviewTasks((all) => all.filter((item) => item.id !== task.id))}><AppIcon name="x" size={22} color={colors.danger} /></Pressable><Pressable disabled={index === 0} onPress={() => setReviewTasks((all) => { const copy = [...all]; [copy[index - 1], copy[index]] = [copy[index], copy[index -1]]; return copy.map((item, position) => ({ ...item, position })); })}><Text style={styles.rowAction}>↑</Text></Pressable></View>)}<View style={styles.addTask}><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={[layout.input, styles.grow]} value={newTaskTitle} onChangeText={setNewTaskTitle} placeholder="Add a task" placeholderTextColor={colors.textMuted} /><Pressable onPress={addDraftTask} style={styles.addCircle}><AppIcon name="plus" size={22} color={colors.onPrimary} /></Pressable></View></Card><Button label="Save plan" onPress={() => void saveReview()} /><Button label="Cancel" kind="cancel" onPress={() => setReview(null)} /></ScrollView>; };
+  const renderReview = () => {
+    if (!review) return null;
+    const identifier = review.details.accountNumber;
+    return <ScrollView ref={reviewScrollRef} contentContainerStyle={layout.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.sectionHeader}>
+        <View><Text style={layout.title}>Review details</Text><Text style={layout.subtitle}>{review.confidence === 'high' ? 'Check the detected fields before creating tasks.' : 'Add the missing details to make this plan useful.'}</Text></View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close review" hitSlop={10} onPress={() => { setReview(null); setReviewErrors({}); }}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
+      </View>
+      {review.sourceUri ? <Image source={{ uri: review.sourceUri }} style={styles.previewImage} /> : null}
+      <Card>
+        <Text style={layout.label}>Document type</Text>
+        <View style={styles.choiceRow}>{(['bill', 'deadline', 'general'] as DocumentCategory[]).map((category) => <Pressable key={category} onPress={() => changeCategory(category)} style={[styles.choice, review.category === category && styles.choiceSelected]}><Text style={[styles.choiceText, review.category === category && styles.choiceTextSelected]}>{category === 'bill' ? 'Bill' : category === 'deadline' ? 'Deadline' : 'General'}</Text></Pressable>)}</View>
+        <Text style={layout.label}>Title *</Text>
+        <TextInput ref={(input) => { validationInputs.current.title = input; }} keyboardAppearance={isDark ? 'dark' : 'light'} style={[layout.input, reviewErrors.title ? styles.validationInput : undefined]} value={review.details.title} onChangeText={(title) => { updateReview({ title }); setReviewErrors((errors) => ({ ...errors, title: '' })); }} placeholder="Task title" placeholderTextColor={colors.textMuted} />
+        {reviewErrors.title ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors.title}</Text> : null}
+        <Text style={layout.label}>Provider or source</Text>
+        <TextInput keyboardAppearance={isDark ? 'dark' : 'light'} style={layout.input} value={review.details.provider} onChangeText={(provider) => updateReview({ provider })} placeholder="Meralco, school, employer..." placeholderTextColor={colors.textMuted} />
+        <Text style={layout.label}>Amount due</Text>
+        <TextInput keyboardAppearance={isDark ? 'dark' : 'light'} style={layout.input} keyboardType="decimal-pad" value={review.details.amountDue?.toString() ?? ''} onChangeText={(value) => updateReview({ amountDue: value ? Number(value.replace(/,/g, '')) : undefined })} placeholder="e.g. 1520.50" placeholderTextColor={colors.textMuted} />
+        <Text style={layout.label}>Due date *</Text>
+        <View ref={(view) => { validationViews.current.dueDate = view; }}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Choose due date${review.details.dueDate ? `, ${dayLabel(review.details.dueDate)}` : ''}`} onPress={() => openDatePicker({ kind: 'review' }, review.details.dueDate)} style={[layout.input, styles.dateField, reviewErrors.dueDate ? styles.validationInput : undefined]}>
+            <AppIcon name="calendar" size={18} color={colors.primary} />
+            <Text style={review.details.dueDate ? layout.body : styles.datePlaceholder}>{review.details.dueDate ? dayLabel(review.details.dueDate) : 'Choose a date'}</Text>
+          </Pressable>
+        </View>
+        {reviewErrors.dueDate ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors.dueDate}</Text> : null}
+        <Text style={layout.label}>Billing period</Text>
+        <TextInput keyboardAppearance={isDark ? 'dark' : 'light'} style={layout.input} value={review.details.billingPeriod ?? ''} onChangeText={(billingPeriod) => updateReview({ billingPeriod })} placeholder="Optional" placeholderTextColor={colors.textMuted} />
+        <Text style={layout.label}>Account/reference number</Text>
+        <TextInput keyboardAppearance={isDark ? 'dark' : 'light'} style={layout.input} value={review.details.accountNumber ?? ''} onChangeText={(accountNumber) => updateReview({ accountNumber })} placeholder="Optional" placeholderTextColor={colors.textMuted} />
+        {identifier ? <View style={styles.inline}><Pill text={maskIdentifier(identifier)} /><Text style={styles.smallNote}>Masked in the app by default.</Text></View> : null}
+        <View style={styles.switchRow}><View style={styles.grow}><Text style={layout.body}>Retain full identifier</Text><Text style={layout.subtitle}>Only enable if you need it for payment reference.</Text></View><Switch value={review.details.retainFullIdentifier} onValueChange={(retainFullIdentifier) => updateReview({ retainFullIdentifier })} trackColor={{ true: colors.primary }} /></View>
+      </Card>
+      <Card>
+        <Text style={layout.heading}>Keep the original image?</Text>
+        <Text style={layout.subtitle}>Details only is selected by default.</Text>
+        {(['details_only', 'image_and_details', 'discard_after_task'] as RetentionChoice[]).map((retention) => <Pressable key={retention} onPress={() => setReview({ ...review, retention })} style={[styles.retentionOption, review.retention === retention && styles.retentionSelected]}><Text style={styles.retentionTitle}>{retention === 'details_only' ? 'Save reviewed details only' : retention === 'image_and_details' ? 'Save image and reviewed details' : 'Discard image after task creation'}</Text><Text style={layout.subtitle}>{retention === 'details_only' ? 'Original image is not kept.' : retention === 'image_and_details' ? 'Stored privately in your Vault.' : 'Creates tasks but keeps no source record.'}</Text></Pressable>)}
+      </Card>
+      <Card>
+        <Text style={layout.heading}>Suggested tasks</Text>
+        <Text style={layout.subtitle}>Edit, remove, or reorder these before saving.</Text>
+        {reviewTasks.map((task, index) => <View key={task.id} style={styles.draftTask}>
+          <View style={styles.grow}>
+            <TextInput ref={(input) => { validationInputs.current[`task-${task.id}`] = input; }} keyboardAppearance={isDark ? 'dark' : 'light'} style={[layout.input, reviewErrors[`task-${task.id}`] ? styles.validationInput : undefined]} value={task.title} onChangeText={(title) => { setReviewTasks((all) => all.map((item) => item.id === task.id ? { ...item, title } : item)); setReviewErrors((errors) => ({ ...errors, [`task-${task.id}`]: '' })); }} />
+            {reviewErrors[`task-${task.id}`] ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors[`task-${task.id}`]}</Text> : null}
+            <View ref={(view) => { validationViews.current[`taskDue-${task.id}`] = view; }}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Choose due date for ${task.title}${task.dueDate ? `, ${dayLabel(task.dueDate)}` : ''}`} onPress={() => openDatePicker({ kind: 'suggested', taskId: task.id }, task.dueDate)} style={[layout.input, styles.dateField, styles.taskDateField, reviewErrors[`taskDue-${task.id}`] ? styles.validationInput : undefined]}>
+                <AppIcon name="calendar" size={16} color={colors.primary} />
+                <Text style={task.dueDate ? styles.taskDateText : styles.datePlaceholder}>{task.dueDate ? dayLabel(task.dueDate) : 'Choose due date'}</Text>
+              </Pressable>
+            </View>
+            {reviewErrors[`taskDue-${task.id}`] ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors[`taskDue-${task.id}`]}</Text> : null}
+          </View>
+          <Pressable onPress={() => setReviewTasks((all) => all.filter((item) => item.id !== task.id))}><AppIcon name="x" size={22} color={colors.danger} /></Pressable>
+          <Pressable disabled={index === 0} onPress={() => setReviewTasks((all) => { const copy = [...all]; [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]]; return copy.map((item, position) => ({ ...item, position })); })}><Text style={styles.rowAction}>{'\u2191'}</Text></Pressable>
+        </View>)}
+        <View style={styles.grow}>
+          <View style={styles.addTask}><TextInput ref={(input) => { validationInputs.current.newTask = input; }} keyboardAppearance={isDark ? 'dark' : 'light'} style={[layout.input, styles.grow, reviewErrors.newTask ? styles.validationInput : undefined]} value={newTaskTitle} onChangeText={(value) => { setNewTaskTitle(value); setReviewErrors((errors) => ({ ...errors, newTask: '' })); }} placeholder="Add a task" placeholderTextColor={colors.textMuted} /><Pressable onPress={addDraftTask} style={styles.addCircle}><AppIcon name="plus" size={22} color={colors.onPrimary} /></Pressable></View>
+          {reviewErrors.newTask ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors.newTask}</Text> : null}
+          <View ref={(view) => { validationViews.current.newTaskDueDate = view; }}>
+            <Pressable accessibilityRole="button" accessibilityLabel={`Choose due date for new task${newTaskDueDate ? `, ${dayLabel(newTaskDueDate)}` : ''}`} onPress={() => openDatePicker({ kind: 'newTask' }, newTaskDueDate)} style={[layout.input, styles.dateField, styles.taskDateField, reviewErrors.newTaskDueDate ? styles.validationInput : undefined]}>
+              <AppIcon name="calendar" size={16} color={colors.primary} />
+              <Text style={newTaskDueDate ? styles.taskDateText : styles.datePlaceholder}>{newTaskDueDate ? dayLabel(newTaskDueDate) : 'Choose due date'}</Text>
+            </Pressable>
+          </View>
+          {reviewErrors.newTaskDueDate ? <Text accessibilityRole="alert" style={styles.validationError}>{reviewErrors.newTaskDueDate}</Text> : null}
+        </View>
+      </Card>
+      <Button label="Save plan" onPress={() => void saveReview()} />
+      <View style={{ marginTop: -10 }}><Button label="Cancel" kind="cancel" onPress={() => { setReview(null); setReviewErrors({}); }} /></View>
+    </ScrollView>;
+  };
   const renderVault = () => {
     const archivedDocuments = documents.filter((document) => document.status === 'archived');
+    const toggleVaultSelection = (documentId: string) => setSelectedVaultIds((current) => {
+      const next = new Set(current);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
+    });
     const query = vaultSearch.trim().toLocaleLowerCase();
     const matchingDocuments = archivedDocuments.filter((document) => {
       if (vaultCategory !== 'all' && document.category !== vaultCategory) return false;
@@ -379,7 +652,26 @@ function App() {
           </Pressable>;
         })}
       </View>
-      {matchingDocuments.map((document) => { const docTasks = tasks.filter((task) => task.documentId === document.id); return <Card key={document.id}><View style={styles.sectionHeader}><View style={styles.grow}><Text style={layout.heading}>{document.details.title}</Text><Text style={layout.subtitle}>{document.details.provider || 'Saved record'} · {dayLabel(document.details.dueDate)}</Text></View><Pill text="Archived" tone="success" /></View>{document.details.amountDue !== undefined ? <Text style={styles.amount}>{peso(document.details.amountDue)}</Text> : null}<Text style={styles.smallNote}>{docTasks.filter((task) => task.completed).length}/{docTasks.length} tasks completed</Text><Button label="Restore for corrections" kind="secondary" onPress={() => void restoreDocument(document)} /></Card>; })}
+      {selectedArchivedVaultDocuments.length ? <Card style={styles.vaultSelectionBar}>
+        <View style={styles.sectionHeader}><Text style={layout.heading}>{selectedArchivedVaultDocuments.length} selected</Text><Pressable accessibilityRole="button" onPress={() => setSelectedVaultIds(new Set())}><Text style={styles.rowAction}>Clear</Text></Pressable></View>
+        <View style={styles.vaultSelectionActions}>
+          <View style={styles.vaultSelectionAction}><Button label={vaultActionBusy ? 'Restoring…' : 'Restore selected'} kind="secondary" disabled={vaultActionBusy || deleteVaultVisible} onPress={() => void restoreSelectedVaultRecords()} /></View>
+          <View style={styles.vaultSelectionAction}><Button label="Delete selected" kind="danger" disabled={vaultActionBusy} onPress={() => setDeleteVaultVisible(true)} /></View>
+        </View>
+      </Card> : null}
+      {!selectedArchivedVaultDocuments.length ? <Text style={styles.smallNote}>Long press a record to select it for restore or deletion.</Text> : null}
+      {matchingDocuments.map((document) => {
+        const docTasks = tasks.filter((task) => task.documentId === document.id);
+        const selected = selectedVaultIds.has(document.id);
+        return <Card key={document.id} style={selected ? styles.vaultRecordSelected : undefined}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`${document.details.title}, ${selected ? 'selected' : 'not selected'}`} accessibilityState={{ selected }} accessibilityHint={selectedVaultIds.size ? 'Tap to change selection. Long press to select this record and its linked tasks.' : 'Opens archived record details. Long press to select this record and its linked tasks.'} onLongPress={() => toggleVaultSelection(document.id)} onPress={() => { if (selectedVaultIds.size) toggleVaultSelection(document.id); else setVaultDocumentDetails(document); }}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.grow}><View style={styles.vaultTitleRow}><Text style={[layout.heading, styles.vaultTitle]}>{document.details.title}</Text><Text style={styles.smallNote}>{docTasks.filter((task) => task.completed).length}/{docTasks.length} tasks</Text></View><Text style={layout.subtitle}>{document.details.provider || 'Saved record'} · {dayLabel(document.details.dueDate)}</Text></View>
+              <View style={styles.vaultRecordStatus}>{selected ? <View style={styles.vaultSelectionMark}><AppIcon name="check" size={14} color={colors.onPrimary} /></View> : null}<Pill text="Archived" tone="success" /></View>
+            </View>
+          </Pressable>
+        </Card>;
+      })}
       {!archivedDocuments.length ? <Card style={[styles.emptyVaultCard, { backgroundColor: colors.background, borderColor: colors.background }]}>
         <View style={[styles.emptyVaultIcon, { backgroundColor: isDark ? '#25392C' : '#EAF2E9' }]}><AppIcon name="shield" size={28} color={isDark ? '#9BC9A5' : '#4F805A'} /></View>
         <Text style={[layout.heading, { color: isDark ? '#9BC9A5' : '#4F805A' }]}>Your Vault is ready</Text>
@@ -392,7 +684,44 @@ function App() {
   };
   const renderProfile = () => <ScrollView contentContainerStyle={layout.content}><View><Text style={layout.title}>Profile</Text><Text style={layout.subtitle}>{user.email}</Text></View><Card><View style={styles.switchRow}><View style={styles.grow}><Text style={layout.heading}>Vault protection</Text><Text style={layout.subtitle}>Ask for fingerprint, face, or device credential before opening Vault.</Text></View><Switch value={biometricEnabled} onValueChange={(value) => void toggleBiometric(value)} trackColor={{ true: colors.primary }} /></View></Card><Card><Text style={layout.heading}>Your data</Text><Text style={layout.subtitle}>Export a copy or permanently remove your account and records.</Text><Button label="Export my data" kind="secondary" onPress={() => void exportData()} /><Button label="Sync now" kind="secondary" onPress={() => void syncAll()} disabled={syncing || user.preview} />{!user.preview ? <Button label="Send password reset" kind="secondary" onPress={() => void resetPassword()} /> : null}<Button label="Delete account and data" kind="danger" onPress={deleteAccount} /></Card><Button label="Sign out" kind="secondary" onPress={() => void signOut()} /><Text style={styles.privacyNote}>PicTask does not use ads, behavioral tracking, cloud AI, or automatic payments.</Text></ScrollView>;
   const renderContent = () => review ? renderReview() : tab === 'home' ? renderHome() : tab === 'calendar' ? renderCalendar() : tab === 'scan' ? renderScanStart() : tab === 'vault' ? renderVault() : renderProfile();
-  return <SafeAreaView style={layout.screen} edges={review ? ['top', 'left', 'right', 'bottom'] : ['top', 'left', 'right']}><StatusBar barStyle={isDark ? "light-content" : "dark-content"} /><AnimatedPage key={review ? "review" : tab}>{renderContent()}</AnimatedPage>{!review ? <View style={[styles.tabBar, styles.tabBarEdge, { paddingBottom: Math.max(insets.bottom, 8) }]}>{tabs.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{ selected: tab === item.id }} onPress={() => changeTab(item.id)} style={({ pressed }) => [styles.tabItem, styles.tabItemEdge, pressed && { opacity: 0.6 }]}><View style={[styles.tabIndicator, tab === item.id && styles.tabIndicatorActive]} /><View style={[styles.navIcon, tab === item.id && styles.navIconActive]}><AppIcon name={item.icon} size={22} color={tab === item.id ? colors.primary : colors.textMuted} /></View><Text style={[styles.tabLabel, tab === item.id && styles.tabLabelSelected]}>{item.label}</Text></Pressable>)}</View> : null}
+  const datePickerValue = datePickerTarget?.kind === 'review' ? review?.details.dueDate
+    : datePickerTarget?.kind === 'suggested' ? reviewTasks.find((task) => task.id === datePickerTarget.taskId)?.dueDate
+    : datePickerTarget?.kind === 'newTask' ? newTaskDueDate
+    : datePickerTarget?.kind === 'edit' ? editTask?.dueDate
+    : undefined;
+  const pickerYear = datePickerMonth.getFullYear();
+  const pickerMonth = datePickerMonth.getMonth();
+  const pickerFirstDay = new Date(pickerYear, pickerMonth, 1).getDay();
+  const pickerDaysInMonth = new Date(pickerYear, pickerMonth + 1, 0).getDate();
+  const pickerCells = Array.from({ length: pickerFirstDay + pickerDaysInMonth }, (_, index) => index < pickerFirstDay ? null : index - pickerFirstDay + 1);
+  const today = new Date();
+  const todayValue = isoDateValue(today);
+  const canShowPreviousMonth = pickerYear > today.getFullYear() || (pickerYear === today.getFullYear() && pickerMonth > today.getMonth());
+  return <SafeAreaView style={layout.screen} edges={review ? ['top', 'left', 'right', 'bottom'] : ['top', 'left', 'right']}><NavigationBar style={isDark ? 'dark' : 'light'} /><StatusBar barStyle={isDark ? "light-content" : "dark-content"} /><AnimatedPage key={review ? "review" : tab}>{renderContent()}</AnimatedPage>{!review ? <View style={[styles.tabBar, styles.tabBarEdge, { paddingBottom: Math.max(insets.bottom, 8) }]}>{tabs.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{ selected: tab === item.id }} onPress={() => changeTab(item.id)} style={({ pressed }) => [styles.tabItem, styles.tabItemEdge, pressed && { opacity: 0.6 }]}><View style={[styles.tabIndicator, tab === item.id && styles.tabIndicatorActive]} /><View style={[styles.navIcon, tab === item.id && styles.navIconActive]}><AppIcon name={item.icon} size={22} color={tab === item.id ? colors.primary : colors.textMuted} /></View><Text style={[styles.tabLabel, tab === item.id && styles.tabLabelSelected]}>{item.label}</Text></Pressable>)}</View> : null}
+    <Modal visible={Boolean(datePickerTarget)} transparent animationType={reducedMotion ? 'none' : 'fade'} onRequestClose={() => setDatePickerTarget(null)}>
+      <View style={[styles.modalBackdrop, styles.datePickerBackdrop]}>
+        <View style={styles.datePickerSheet}>
+          <View style={styles.notificationHeader}>
+            <View><Text style={layout.heading}>Choose due date</Text><Text style={layout.subtitle}>Select a day on the calendar</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close date picker" hitSlop={10} onPress={() => setDatePickerTarget(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
+          </View>
+          <View style={styles.calendarHeader}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Previous month" accessibilityState={{ disabled: !canShowPreviousMonth }} disabled={!canShowPreviousMonth} style={[styles.calendarArrow, !canShowPreviousMonth && styles.datePickerDisabled]} onPress={() => setDatePickerMonth(new Date(pickerYear, pickerMonth - 1, 1))}><AppIcon name="chevron-left" size={22} color={canShowPreviousMonth ? colors.primary : colors.textMuted} /></Pressable>
+            <Text style={layout.heading}>{datePickerMonth.toLocaleString('en-PH', { month: 'long', year: 'numeric' })}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Next month" style={styles.calendarArrow} onPress={() => setDatePickerMonth(new Date(pickerYear, pickerMonth + 1, 1))}><AppIcon name="chevron-right" size={22} color={colors.primary} /></Pressable>
+          </View>
+          <View style={styles.weekRow}>{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <Text style={styles.weekday} key={`${day}-${index}`}>{day}</Text>)}</View>
+          <View style={styles.datePickerGrid}>{pickerCells.map((day, index) => {
+            if (!day) return <View key={`empty-${index}`} style={styles.datePickerDay} />;
+            const value = isoDateValue(new Date(pickerYear, pickerMonth, day));
+            const selected = value === datePickerValue;
+            const disabled = value < todayValue;
+            return <Pressable key={value} accessibilityRole="button" accessibilityLabel={new Intl.DateTimeFormat('en-PH', { dateStyle: 'full' }).format(new Date(`${value}T12:00:00`))} accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => chooseDate(value)} style={[styles.datePickerDay, disabled && styles.datePickerDisabled, selected && styles.datePickerDaySelected]}><Text style={[styles.datePickerDayText, disabled && styles.datePickerDayTextDisabled, selected && styles.datePickerDayTextSelected]}>{day}</Text></Pressable>;
+          })}</View>
+          <Button label="Cancel" kind="secondary" onPress={() => setDatePickerTarget(null)} />
+        </View>
+      </View>
+    </Modal>
     <Modal visible={notificationsVisible} transparent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={() => setNotificationsVisible(false)}>
       <View style={styles.modalBackdrop}>
         <View style={[styles.sheetKeyboard, styles.notificationSheet]}>
@@ -415,7 +744,123 @@ function App() {
         </View>
       </View>
     </Modal>
-    <Modal visible={Boolean(editTask)} transparent animationType={reducedMotion ? "none" : "slide"} onRequestClose={() => setEditTask(null)}>{editTask ? <View style={styles.modalBackdrop}><KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.sheetKeyboard}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.modalCard, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}><Text style={layout.heading}>Edit task</Text><Text style={layout.label}>Title</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={editTask.title} onChangeText={(title) => setEditTask({ ...editTask, title })} /><Text style={layout.label}>Due date</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={editTask.dueDate ?? ''} onChangeText={(dueDate) => setEditTask({ ...editTask, dueDate })} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textMuted} /><Text style={layout.label}>Reminder days</Text><TextInput keyboardAppearance={isDark ? "dark" : "light"} style={layout.input} value={editTask.reminderDays.join(', ')} onChangeText={(value) => setEditTask({ ...editTask, reminderDays: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0) })} placeholder="7, 3, 1" placeholderTextColor={colors.textMuted} /><Button label="Save changes" onPress={() => void saveEditedTask()} /><Button label="Delete task" kind="danger" onPress={() => void deleteTask(editTask)} /><Button label="Cancel" kind="secondary" onPress={() => setEditTask(null)} /></ScrollView></KeyboardAvoidingView></View> : null}</Modal></SafeAreaView>;
+    <Modal visible={Boolean(taskDetails)} transparent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={() => setTaskDetails(null)}>
+      <View style={styles.modalBackdrop}>
+        {selectedTask ? <View style={[styles.sheetKeyboard, styles.notificationSheet]}>
+          <View style={styles.notificationHeader}>
+            <View style={styles.grow}><Text style={layout.heading}>Task details</Text><Text style={layout.subtitle}>Read-only overview</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close task details" hitSlop={10} onPress={() => setTaskDetails(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
+          </View>
+          <ScrollView contentContainerStyle={[styles.notificationList, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <Card>
+              <Text style={layout.title}>{selectedTaskDocument?.details.title ?? selectedTask.title}</Text>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Status</Text><Pill text={selectedTask.completed ? 'Completed' : 'In progress'} tone={selectedTask.completed ? 'success' : 'blue'} /></View>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Due date</Text><Text style={layout.body}>{dayLabel(selectedTask.dueDate)}</Text></View>
+            </Card>
+            {selectedTaskDocument ? <Card>
+              <Text style={layout.heading}>Document details</Text>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Type</Text><Text style={[layout.body, styles.taskDetailValue]}>{selectedTaskDocument.category}</Text></View>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Source</Text><Text style={[layout.body, styles.taskDetailValue]}>{selectedTaskDocument.sourceType}</Text></View>
+            </Card> : null}
+            <Card>
+              <Text style={layout.heading}>Tasks in this plan</Text>
+              <Text style={layout.subtitle}>{tasksInSelectedPlan.length} related task{tasksInSelectedPlan.length === 1 ? '' : 's'}</Text>
+              {tasksInSelectedPlan.map((task) => <View key={task.id} style={styles.planTaskRow}>
+                <View style={[styles.planTaskMark, task.completed && styles.planTaskMarkComplete]}>{task.completed ? <AppIcon name="check" size={14} color={colors.onPrimary} /> : null}</View>
+                <View style={styles.grow}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text><Text style={styles.taskMeta}>{dayLabel(task.dueDate)}</Text></View>
+                <Pill text="Done" tone="success" />
+              </View>)}
+            </Card>
+          </ScrollView>
+        </View> : null}
+      </View>
+    </Modal>
+    <Modal visible={Boolean(archiveReview)} transparent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={() => { if (!archiving && !restoringReviewedTasks) setArchiveReview(null); }}>
+      <View style={styles.modalBackdrop}>
+        {archiveReview ? <View style={[styles.sheetKeyboard, styles.notificationSheet]}>
+          <View style={styles.notificationHeader}>
+            <View style={styles.grow}><Text style={layout.heading}>Review before moving</Text><Text style={layout.subtitle}>This record is not in your Vault yet.</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close Vault review" hitSlop={10} disabled={archiving || restoringReviewedTasks} onPress={() => setArchiveReview(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
+          </View>
+          <ScrollView contentContainerStyle={[styles.notificationList, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <Card>
+              <Text style={layout.title}>{archiveReview.details.title}</Text>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Document type</Text><Text style={[layout.body, styles.taskDetailValue]}>{archiveReview.category}</Text></View>
+              {archiveReview.details.provider ? <View style={styles.taskDetailRow}><Text style={layout.label}>Provider or source</Text><Text style={[layout.body, styles.taskDetailValue]}>{archiveReview.details.provider}</Text></View> : null}
+              {archiveReview.details.amountDue !== undefined ? <View style={styles.taskDetailRow}><Text style={layout.label}>Amount due</Text><Text style={[layout.body, styles.taskDetailValue]}>{peso(archiveReview.details.amountDue)}</Text></View> : null}
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Due date</Text><Text style={[layout.body, styles.taskDetailValue]}>{dayLabel(archiveReview.details.dueDate)}</Text></View>
+              {archiveReview.details.billingPeriod ? <View style={styles.taskDetailRow}><Text style={layout.label}>Billing period</Text><Text style={[layout.body, styles.taskDetailValue]}>{archiveReview.details.billingPeriod}</Text></View> : null}
+              {archiveReview.details.accountNumber ? <View style={styles.taskDetailRow}><Text style={layout.label}>Account/reference</Text><Text style={[layout.body, styles.taskDetailValue]}>{maskIdentifier(archiveReview.details.accountNumber)}</Text></View> : null}
+              <View style={styles.taskDetailRow}><Text style={styles.smallNote}>Source: {archiveReview.sourceType}</Text><Text style={styles.smallNote}>{archiveReview.retention === 'image_and_details' ? 'Image retained' : 'Details only'}</Text></View>
+            </Card>
+            <Card>
+              <Text style={layout.heading}>Completed tasks</Text>
+              {tasks.filter((task) => task.documentId === archiveReview.id).sort((a, b) => a.position - b.position).map((task) => <View key={task.id} style={styles.planTaskRow}>
+                <View style={[styles.planTaskMark, styles.planTaskMarkComplete]}><AppIcon name="check" size={14} color={colors.onPrimary} /></View>
+                <View style={styles.grow}><Text style={styles.taskTitle}>{task.title}</Text><Text style={styles.taskMeta}>{dayLabel(task.dueDate)}</Text></View>
+              </View>)}
+            </Card>
+            <Text style={layout.subtitle}>Move this reviewed record to your Vault?</Text>
+            <View style={styles.archiveReviewActions}>
+              <Button label={archiving ? 'Moving to Vault…' : 'Move to Vault'} onPress={() => void confirmArchive()} disabled={archiving || restoringReviewedTasks} />
+              <Button label={restoringReviewedTasks ? 'Restoring tasks…' : 'Restore tasks'} kind="secondary" onPress={() => void restoreReviewedTasks()} disabled={archiving || restoringReviewedTasks} />
+              <Button label="Cancel" kind="cancel" onPress={() => setArchiveReview(null)} disabled={archiving || restoringReviewedTasks} />
+            </View>
+          </ScrollView>
+        </View> : null}
+      </View>
+    </Modal>
+    <Modal visible={Boolean(vaultDocumentDetails)} transparent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={() => { if (!vaultActionBusy) setVaultDocumentDetails(null); }}>
+      <View style={styles.modalBackdrop}>
+        {vaultDocumentDetails ? <View style={[styles.sheetKeyboard, styles.notificationSheet, styles.vaultDetailsSheet]}>
+          <View style={styles.notificationHeader}>
+            <View style={styles.grow}><Text style={layout.heading}>Archived record</Text><Text style={layout.subtitle}>Review the saved details and completed tasks.</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close archived record details" hitSlop={10} disabled={vaultActionBusy} onPress={() => setVaultDocumentDetails(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
+          </View>
+          <ScrollView contentContainerStyle={[styles.notificationList, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <Card>
+              <Text style={layout.title}>{vaultDocumentDetails.details.title}</Text>
+              {vaultDocumentDetails.details.amountDue !== undefined ? <View style={styles.taskDetailRow}><Text style={layout.label}>Amount due</Text><Text style={[layout.body, styles.taskDetailValue]}>{peso(vaultDocumentDetails.details.amountDue)}</Text></View> : null}
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Due date</Text><Text style={[layout.body, styles.taskDetailValue]}>{dayLabel(vaultDocumentDetails.details.dueDate)}</Text></View>
+            </Card>
+            <Card>
+              <Text style={layout.heading}>Document details</Text>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Type</Text><Text style={[layout.body, styles.taskDetailValue]}>{vaultDocumentDetails.category}</Text></View>
+              <View style={styles.taskDetailRow}><Text style={layout.label}>Source</Text><Text style={[layout.body, styles.taskDetailValue]}>{vaultDocumentDetails.sourceType}</Text></View>
+            </Card>
+            <Card>
+              <Text style={layout.heading}>Tasks in this plan</Text>
+              {tasks.filter((task) => task.documentId === vaultDocumentDetails.id).sort((a, b) => a.position - b.position).map((task) => <View key={task.id} style={styles.planTaskRow}>
+                <View style={[styles.planTaskMark, styles.planTaskMarkComplete]}><AppIcon name="check" size={14} color={colors.onPrimary} /></View>
+                <View style={styles.grow}><Text style={[styles.taskTitle, styles.completedText]}>{task.title}</Text><Text style={styles.taskMeta}>{dayLabel(task.dueDate)}</Text></View>
+                <Pill text="Done" tone="success" />
+              </View>)}
+            </Card>
+            <View style={styles.archiveReviewActions}>
+              <Button label={vaultActionBusy ? 'Restoring…' : 'Restore'} kind="secondary" disabled={vaultActionBusy} onPress={() => void restoreVaultDocumentDetails()} />
+              <Button label="Delete" kind="danger" disabled={vaultActionBusy} onPress={() => {
+                setSelectedVaultIds(new Set([vaultDocumentDetails.id]));
+                setVaultDocumentDetails(null);
+                setVaultDeleteFromDetails(true);
+                setDeleteVaultVisible(true);
+              }} />
+            </View>
+          </ScrollView>
+        </View> : null}
+      </View>
+    </Modal>
+    <Modal visible={deleteVaultVisible} transparent animationType={reducedMotion ? 'none' : 'fade'} onRequestClose={() => { if (!vaultActionBusy) { setDeleteVaultVisible(false); if (vaultDeleteFromDetails) { setSelectedVaultIds(new Set()); setVaultDeleteFromDetails(false); } } }}>
+      <View style={[styles.modalBackdrop, styles.deleteVaultBackdrop]}>
+        <View style={[styles.modalCard, styles.deleteVaultModal, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
+          <View style={styles.deleteVaultIcon}><AppIcon name="x" size={22} color={colors.danger} /></View>
+          <Text style={layout.heading}>Delete selected records?</Text>
+          <Text style={layout.subtitle}>This permanently deletes {selectedArchivedVaultDocuments.length} archived record{selectedArchivedVaultDocuments.length === 1 ? '' : 's'}, along with their linked tasks and any retained images. This cannot be undone.</Text>
+          <Button label={vaultActionBusy ? 'Deleting…' : `Delete ${selectedArchivedVaultDocuments.length} record${selectedArchivedVaultDocuments.length === 1 ? '' : 's'}`} kind="danger" disabled={vaultActionBusy || !selectedArchivedVaultDocuments.length} onPress={() => void deleteSelectedVaultRecords()} />
+          <Button label="Cancel" kind="secondary" disabled={vaultActionBusy} onPress={() => { setDeleteVaultVisible(false); if (vaultDeleteFromDetails) { setSelectedVaultIds(new Set()); setVaultDeleteFromDetails(false); } }} />
+        </View>
+      </View>
+    </Modal>
+    <Modal visible={Boolean(editTask)} transparent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={() => { setEditTask(null); setTaskEditErrors({}); }}>{editTask ? <View style={styles.modalBackdrop}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.sheetKeyboard}><ScrollView ref={editTaskScrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.modalCard, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}><Text style={layout.heading}>Edit task</Text><Text style={layout.label}>Title *</Text><TextInput ref={(input) => { validationInputs.current.editTitle = input; }} keyboardAppearance={isDark ? 'dark' : 'light'} style={[layout.input, taskEditErrors.title ? styles.validationInput : undefined]} value={editTask.title} onChangeText={(title) => { setEditTask({ ...editTask, title }); setTaskEditErrors((errors) => ({ ...errors, title: '' })); }} />{taskEditErrors.title ? <Text accessibilityRole="alert" style={styles.validationError}>{taskEditErrors.title}</Text> : null}<Text style={layout.label}>Due date *</Text><View ref={(view) => { validationViews.current.editDueDate = view; }}><Pressable accessibilityRole="button" accessibilityLabel={`Choose due date${editTask.dueDate ? `, ${dayLabel(editTask.dueDate)}` : ''}`} onPress={() => openDatePicker({ kind: 'edit' }, editTask.dueDate)} style={[layout.input, styles.dateField, taskEditErrors.dueDate ? styles.validationInput : undefined]}><AppIcon name="calendar" size={18} color={colors.primary} /><Text style={editTask.dueDate ? layout.body : styles.datePlaceholder}>{editTask.dueDate ? dayLabel(editTask.dueDate) : 'Choose a date'}</Text></Pressable></View>{taskEditErrors.dueDate ? <Text accessibilityRole="alert" style={styles.validationError}>{taskEditErrors.dueDate}</Text> : null}<Text style={layout.label}>Reminder days</Text><TextInput keyboardAppearance={isDark ? 'dark' : 'light'} style={layout.input} value={editTask.reminderDays.join(', ')} onChangeText={(value) => setEditTask({ ...editTask, reminderDays: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0) })} placeholder="7, 3, 1" placeholderTextColor={colors.textMuted} /><Button label="Save changes" onPress={() => void saveEditedTask()} /><Button label="Delete task" kind="danger" onPress={() => void deleteTask(editTask)} /><Button label="Cancel" kind="secondary" onPress={() => { setEditTask(null); setTaskEditErrors({}); }} /></ScrollView></KeyboardAvoidingView></View> : null}</Modal></SafeAreaView>;
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
@@ -432,14 +877,47 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   notificationBadge: { position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.danger },
   notificationBadgeText: { color: colors.white, fontSize: 10, fontWeight: '800' },
   notificationSheet: { backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 8 },
+  vaultDetailsSheet: { overflow: 'hidden' },
   notificationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 12 },
   notificationList: { gap: 10, paddingTop: 4 },
+  archiveReviewActions: { gap: 10, marginTop: 2 },
   notificationItem: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.surface, padding: 14 },
   notificationIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSurface },
   notificationTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
   notificationBody: { color: colors.textMuted, fontSize: 13, marginTop: 3 },
   notificationDate: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 5 },
   notificationEmpty: { alignItems: 'center', gap: 10, paddingVertical: 28, paddingHorizontal: 12 },
+  vaultSelectionBar: { gap: 12 },
+  vaultSelectionActions: { flexDirection: 'row', gap: 10 },
+  vaultSelectionAction: { flex: 1 },
+  vaultRecordSelected: { borderWidth: 2, borderColor: colors.primary },
+  vaultRecordStatus: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  vaultTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'flex-start', gap: 8 },
+  vaultTitle: { flexShrink: 1 },
+  vaultSelectionMark: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  deleteVaultBackdrop: { justifyContent: 'center', padding: 22 },
+  deleteVaultModal: { alignItems: 'center', borderRadius: 24 },
+  deleteVaultIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.warningSurface },
+  taskDetailRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  taskDetailValue: { flex: 1, textAlign: 'right' },
+  planTaskRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  planTaskMark: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  planTaskMarkComplete: { backgroundColor: colors.primary },
+  validationInput: { borderColor: colors.danger, borderWidth: 1.5 },
+  validationError: { color: colors.danger, fontSize: 12, lineHeight: 17 },
+  dateField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  datePlaceholder: { color: colors.textMuted, fontSize: 15 },
+  taskDateField: { minHeight: 40, paddingVertical: 8, marginTop: 6 },
+  taskDateText: { color: colors.text, fontSize: 13 },
+  datePickerBackdrop: { justifyContent: 'center', padding: 20 },
+  datePickerSheet: { width: '100%', maxWidth: 380, alignSelf: 'center', borderRadius: 24, padding: 18, gap: 12, backgroundColor: colors.background },
+  datePickerGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  datePickerDay: { width: '14.2857%', height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  datePickerDaySelected: { backgroundColor: colors.primary },
+  datePickerDayText: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  datePickerDisabled: { opacity: 0.4 },
+  datePickerDayTextDisabled: { color: colors.textMuted },
+  datePickerDayTextSelected: { color: colors.onPrimary, fontWeight: '800' },
   headerBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerMark: { width: 36, height: 36, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-7deg' }] },
   headerName: { color: colors.primaryDark, fontSize: 23, fontWeight: '800', letterSpacing: -0.8 },

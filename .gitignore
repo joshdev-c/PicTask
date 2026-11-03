@@ -50,3 +50,7 @@ yarn-error.*
 
 # local IDE files
 .claude/
+
+# UI/UX Pro Max Skill
+.github/
+.kiro/

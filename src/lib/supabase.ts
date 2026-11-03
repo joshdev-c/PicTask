@@ -50,6 +50,16 @@ export async function deleteRemoteTask(id: string) {
   if (error) throw error;
 }
 
+export async function deleteRemoteDocument(record: DocumentRecord) {
+  if (!supabase) return;
+  if (record.imagePath) {
+    const { error: imageError } = await supabase.storage.from('vault-images').remove([record.imagePath]);
+    if (imageError) throw imageError;
+  }
+  const { error } = await supabase.from('documents').delete().eq('id', record.id);
+  if (error) throw error;
+}
+
 export async function fetchRemoteRecords(ownerId: string) {
   if (!supabase) return null;
   const [{ data: documents, error: documentError }, { data: tasks, error: taskError }] = await Promise.all([

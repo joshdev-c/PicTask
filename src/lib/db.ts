@@ -40,6 +40,15 @@ export async function removeLocalTask(id: string) {
   await connection.runAsync('DELETE FROM tasks_local WHERE id = ?', id);
 }
 
+export async function removeLocalDocumentAndTasks(documentId: string) {
+  const connection = await db();
+  const rows = await connection.getAllAsync<{ id: string; data: string }>('SELECT id, data FROM tasks_local');
+  await Promise.all(rows
+    .filter((row) => (JSON.parse(row.data) as TaskRecord).documentId === documentId)
+    .map((row) => connection.runAsync('DELETE FROM tasks_local WHERE id = ?', row.id)));
+  await connection.runAsync('DELETE FROM documents_local WHERE id = ?', documentId);
+}
+
 export async function removeLocalRecords(ownerId: string) {
   const connection = await db();
   await connection.runAsync('DELETE FROM documents_local WHERE owner_id = ?', ownerId);

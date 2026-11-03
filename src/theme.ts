@@ -23,7 +23,7 @@ export const darkColors: ThemeColors = {
 const createLayout = (colors: ThemeColors) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 24, paddingBottom: 28, gap: 18, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  card: { backgroundColor: colors.surface, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: colors.border, gap: 10 },
+  card: { backgroundColor: colors.surface, borderRadius: 24, padding: 20, borderWidth: 0, shadowColor: '#000000', shadowOpacity: colors.background === darkColors.background ? 0.24 : 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 3, gap: 10 },
   title: { color: colors.primaryDark, fontSize: 32, fontWeight: '700', letterSpacing: -0.4 },
   subtitle: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
   heading: { color: colors.primaryDark, fontSize: 18, fontWeight: '700' },
