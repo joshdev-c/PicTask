@@ -20,6 +20,7 @@ import { getCurrentTaskInChain, getCurrentTasks, getTaskPrerequisite } from './s
 import { loadLocalRecords, loadMutations, queueMutation, removeLocalDocumentAndTasks, removeLocalRecords, removeLocalTask, removeMutation, saveLocalDocument, saveLocalTask } from './src/lib/db';
 import { deleteRemoteDocument, deleteRemoteTask, fetchRemoteRecords, getVaultImageUrl, supabase, syncDocument, syncTask } from './src/lib/supabase';
 import { getUpcomingTaskReminders, scheduleTaskReminders, type UpcomingTaskReminder } from './src/lib/notifications';
+import { getOverdueTasksForFollowUp, getRecentOverdueTasks, isMoreThanDaysPast } from './src/lib/overdueTasks';
 
 const appIcons = {
   'arrow-right': ArrowRight,
@@ -245,6 +246,8 @@ function TaskRow({ task, onToggle, onOpen, onEdit, blockedBy, compact = false, r
   const { colors } = useTheme();
   const styles = useAppStyles();
   const locked = !task.completed && Boolean(blockedBy);
+  const overdue = !task.completed && Boolean(task.dueDate && isPastDate(task.dueDate));
+  const taskStatus = locked ? `Complete "${blockedBy?.title}" first` : task.syncState === 'synced' ? 'Synced' : task.syncState === 'local' ? 'Local preview' : 'Waiting to sync';
   const checkScale = useRef(new Animated.Value(task.completed ? 1 : 0)).current;
   const rowScale = useRef(new Animated.Value(1)).current;
   const previousCompleted = useRef(task.completed);
@@ -269,7 +272,7 @@ function TaskRow({ task, onToggle, onOpen, onEdit, blockedBy, compact = false, r
     checkScale.setValue(0);
     rowScale.setValue(1);
   }, [checkScale, rowScale, reducedMotion, task.completed]);
-  return <Animated.View style={{ transform: [{ scale: rowScale }] }}><View style={[styles.taskRow, task.completed && styles.completedRow]}><Pressable accessibilityRole="checkbox" accessibilityLabel={locked ? `${task.title}, locked until ${blockedBy?.title} is complete` : task.title} hitSlop={6} disabled={locked} accessibilityState={{ checked: task.completed, disabled: locked }} onPress={onToggle} style={[styles.check, task.completed && styles.checked, locked && styles.disabled]}><Animated.View style={{ opacity: checkScale, transform: [{ scale: checkScale }] }}><AppIcon name="check" size={17} color={colors.onPrimary} /></Animated.View></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${onOpen ? 'View' : 'Edit'} task: ${task.title}`} accessibilityHint={onOpen ? 'Opens task details and related tasks' : 'Opens the task editor'} onPress={onOpen ?? onEdit} style={styles.taskText}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text>{!compact ? <View style={styles.dueDateLine}><AppIcon name="calendar" size={14} color={colors.textMuted} /><Text style={styles.taskMeta}>{dayLabel(task.dueDate)} · {locked ? `Complete "${blockedBy?.title}" first` : task.syncState === 'synced' ? 'Synced' : task.syncState === 'local' ? 'Local preview' : 'Waiting to sync'}</Text></View> : null}</Pressable>{onEdit ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit task: ${task.title}`} onPress={onEdit}><Text style={styles.rowAction}>Edit</Text></Pressable> : null}</View></Animated.View>;
+  return <Animated.View style={{ transform: [{ scale: rowScale }] }}><View style={[styles.taskRow, task.completed && styles.completedRow]}><Pressable accessibilityRole="checkbox" accessibilityLabel={locked ? `${task.title}, locked until ${blockedBy?.title} is complete` : task.title} hitSlop={6} disabled={locked} accessibilityState={{ checked: task.completed, disabled: locked }} onPress={onToggle} style={[styles.check, task.completed && styles.checked, locked && styles.disabled]}><Animated.View style={{ opacity: checkScale, transform: [{ scale: checkScale }] }}><AppIcon name="check" size={17} color={colors.onPrimary} /></Animated.View></Pressable><Pressable accessibilityRole="button" accessibilityLabel={`${onOpen ? 'View' : 'Edit'} task: ${task.title}`} accessibilityHint={onOpen ? 'Opens task details and related tasks' : 'Opens the task editor'} onPress={onOpen ?? onEdit} style={styles.taskText}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text>{!compact ? <View style={styles.dueDateLine}><AppIcon name="calendar" size={14} color={colors.textMuted} /><Text style={[styles.taskMeta, overdue && styles.taskOverdueMeta]}>{dayLabel(task.dueDate)} · {overdue ? `Overdue · ${taskStatus}` : taskStatus}</Text></View> : null}</Pressable>{onEdit ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit task: ${task.title}`} onPress={onEdit}><Text style={styles.rowAction}>Edit</Text></Pressable> : null}</View></Animated.View>;
 }
 
 function PlanProgress({ completed, total }: { completed: number; total: number }) {
@@ -372,6 +375,7 @@ function App() {
   const [plansExpanded, setPlansExpanded] = useState(false);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]); const [tasks, setTasks] = useState<TaskRecord[]>([]); const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [recentlyCompletedTaskIds, setRecentlyCompletedTaskIds] = useState<Set<string>>(() => new Set());
+  const [dismissedOverdueTaskIds, setDismissedOverdueTaskIds] = useState<Set<string>>(() => new Set());
   const completionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const [biometricEnabled, setBiometricEnabled] = useState(false); const [syncing, setSyncing] = useState(false); const [review, setReview] = useState<ScanReviewInput | null>(null); const [reviewTasks, setReviewTasks] = useState<TaskRecord[]>([]); const [editTask, setEditTask] = useState<TaskRecord | null>(null); const [taskDetails, setTaskDetails] = useState<TaskRecord | null>(null); const [vaultDocumentDetails, setVaultDocumentDetails] = useState<DocumentRecord | null>(null); const [archiveReview, setArchiveReview] = useState<DocumentRecord | null>(null); const [archiving, setArchiving] = useState(false); const [restoringReviewedTasks, setRestoringReviewedTasks] = useState(false); const [selectedVaultIds, setSelectedVaultIds] = useState<Set<string>>(() => new Set()); const [deleteVaultVisible, setDeleteVaultVisible] = useState(false); const [vaultDeleteFromDetails, setVaultDeleteFromDetails] = useState(false); const [vaultActionBusy, setVaultActionBusy] = useState(false); const [newTaskTitle, setNewTaskTitle] = useState(''); const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [deliveredReminders, setDeliveredReminders] = useState<UpcomingTaskReminder[]>([]);
@@ -459,6 +463,7 @@ function App() {
     completionTimers.current.forEach(clearTimeout);
     completionTimers.current.clear();
     setRecentlyCompletedTaskIds(new Set());
+    setDismissedOverdueTaskIds(new Set());
   }
 
   useEffect(() => { let active = true; let unsubscribe: (() => void) | undefined; void (async () => { const saved = await SecureStore.getItemAsync('pictask.biometric'); if (active) setBiometricEnabled(saved === 'true'); if (supabase) { const { data } = await supabase.auth.getSession(); if (active && data.session?.user) setUser({ id: data.session.user.id, email: data.session.user.email ?? 'Account', preview: false }); const listener = supabase.auth.onAuthStateChange((_event, session) => { if (active) setUser(session?.user ? { id: session.user.id, email: session.user.email ?? 'Account', preview: false } : null); }); unsubscribe = () => listener.data.subscription.unsubscribe(); } if (active) setReady(true); })(); return () => { active = false; unsubscribe?.(); }; }, []);
@@ -496,18 +501,69 @@ function App() {
     setReviewTasks((current) => [...current, { id: createId('task'), ownerId: user.id, documentId: 'draft', position: current.length, title: newTaskTitle.trim(), dueDate: newTaskDueDate, completed: false, recommendationSource: 'manual', reminderDays: [7, 3, 1], syncState: 'pending', createdAt: nowIso(), updatedAt: nowIso() }]);
     setNewTaskTitle('');
   };
+  const persistReviewedPlan = async (archived: boolean) => {
+    if (!review || !user) return;
+    const id = createId('document');
+    const timestamp = nowIso();
+    const cleanDetails = { ...review.details, title: review.details.title.trim(), dueDate: review.details.dueDate?.trim() };
+    delete cleanDetails.rawText;
+    if (cleanDetails.accountNumber && !cleanDetails.retainFullIdentifier) cleanDetails.accountNumber = cleanDetails.accountNumber.slice(-4);
+    const document: DocumentRecord = {
+      id,
+      ownerId: user.id,
+      sourceType: review.sourceType,
+      category: review.category,
+      details: cleanDetails,
+      retention: review.retention,
+      sourceUri: review.retention === 'image_and_details' ? review.sourceUri : undefined,
+      status: archived ? 'archived' : 'active',
+      archivedAt: archived ? timestamp : undefined,
+      syncState: user.preview ? 'local' : 'pending',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const nextTasks = reviewTasks.map((task, position) => ({
+      ...task,
+      title: task.title.trim(),
+      documentId: id,
+      ownerId: user.id,
+      position,
+      dueDate: task.dueDate ?? document.details.dueDate,
+      updatedAt: timestamp,
+    }));
+    const savedDocument = await persistDocument(document);
+    const savedTasks = await Promise.all(nextTasks.map(persistTask));
+    setDocuments((all) => [savedDocument, ...all]);
+    setTasks((all) => [...all, ...savedTasks]);
+    if (!archived) {
+      const firstTask = getCurrentTaskInChain(savedTasks);
+      if (firstTask) void scheduleTaskReminders(firstTask);
+    }
+    if (review.sourceUri && review.retention !== 'image_and_details') {
+      try {
+        await FileSystem.deleteAsync(review.sourceUri, { idempotent: true });
+      } catch {
+        // Gallery providers may own the original URI.
+      }
+    }
+    setReview(null);
+    setReviewErrors({});
+    setReviewTasks([]);
+    setNewTaskDueDate('');
+    setTab('home');
+  };
   const saveReview = async () => {
     if (!review || !user) return;
     const errors: Record<string, string> = {};
     if (!review.details.title.trim()) errors.title = 'Enter a title.';
     else if (hasExistingMainTitle(review.details.title, documents)) errors.title = 'This main title already exists. Choose a different title.';
     if (!review.details.dueDate || !isValidIsoDate(review.details.dueDate)) errors.dueDate = 'Choose a valid due date.';
-    else if (isPastDate(review.details.dueDate)) errors.dueDate = 'Choose today or a future date.';
+    else if (review.sourceType === 'manual' && isPastDate(review.details.dueDate)) errors.dueDate = 'Choose today or a future date.';
     const emptyTask = reviewTasks.find((task) => !task.title.trim());
     if (emptyTask) errors[`task-${emptyTask.id}`] = 'Enter a task title or remove this task.';
     const taskWithoutDate = reviewTasks.find((task) => !task.dueDate || !isValidIsoDate(task.dueDate));
     if (taskWithoutDate) errors[`taskDue-${taskWithoutDate.id}`] = 'Choose a valid due date for this task.';
-    else {
+    else if (review.sourceType === 'manual') {
       const taskWithPastDate = reviewTasks.find((task) => task.dueDate && isPastDate(task.dueDate));
       if (taskWithPastDate) errors[`taskDue-${taskWithPastDate.id}`] = 'Choose today or a future date for this task.';
     }
@@ -519,7 +575,29 @@ function App() {
       else scrollToValidationInput(invalidField, reviewScrollRef);
       return;
     }
-    const id = createId('document'); const timestamp = nowIso(); const cleanDetails = { ...review.details, title: review.details.title.trim(), dueDate: review.details.dueDate?.trim() }; delete cleanDetails.rawText; if (cleanDetails.accountNumber && !cleanDetails.retainFullIdentifier) cleanDetails.accountNumber = cleanDetails.accountNumber.slice(-4); const document: DocumentRecord = { id, ownerId: user.id, sourceType: review.sourceType, category: review.category, details: cleanDetails, retention: review.retention, sourceUri: review.retention === 'image_and_details' ? review.sourceUri : undefined, status: 'active', syncState: user.preview ? 'local' : 'pending', createdAt: timestamp, updatedAt: timestamp }; const nextTasks = reviewTasks.map((task, position) => ({ ...task, title: task.title.trim(), documentId: id, ownerId: user.id, position, dueDate: task.dueDate ?? document.details.dueDate, updatedAt: timestamp }));         const savedDocument = await persistDocument(document); const savedTasks = await Promise.all(nextTasks.map(persistTask)); setDocuments((all) => [savedDocument, ...all]); setTasks((all) => [...all, ...savedTasks]); const firstTask = getCurrentTaskInChain(savedTasks); if (firstTask) void scheduleTaskReminders(firstTask); if (review.sourceUri && review.retention !== 'image_and_details') try { await FileSystem.deleteAsync(review.sourceUri, { idempotent: true }); } catch { /* gallery provider may own the original */ } setReview(null); setReviewErrors({}); setReviewTasks([]); setNewTaskDueDate(''); setTab('home');
+    if (review.sourceType !== 'manual' && isMoreThanDaysPast(review.details.dueDate, 30)) {
+      Alert.alert(
+        'This document is over a month past due',
+        'Would you like to save this plan in your Vault?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Keep in Vault',
+            onPress: () => {
+              void persistReviewedPlan(true).catch((error) => {
+                Alert.alert('Could not save plan', error instanceof Error ? error.message : 'Please try again.');
+              });
+            },
+          },
+        ],
+      );
+      return;
+    }
+    try {
+      await persistReviewedPlan(false);
+    } catch (error) {
+      Alert.alert('Could not save plan', error instanceof Error ? error.message : 'Please try again.');
+    }
   };
   const toggleTask = async (task: TaskRecord) => {
     const chain = tasks.filter((item) => item.documentId === task.documentId);
@@ -589,6 +667,48 @@ function App() {
   };
   const deleteTask = async (task: TaskRecord) => { await removeLocalTask(task.id); const updatedTasks = tasks.filter((item) => item.id !== task.id); setTasks(updatedTasks); setEditTask(null); const currentTask = getCurrentTaskInChain(updatedTasks.filter((item) => item.documentId === task.documentId)); if (currentTask) void scheduleTaskReminders(currentTask); if (!user || user.preview || !supabase) return; try { await deleteRemoteTask(task.id); } catch { await queueMutation({ id: createId('mutation'), ownerId: task.ownerId, entity: 'task', operation: 'delete', payload: JSON.stringify({ id: task.id }), localTimestamp: nowIso(), retryCount: 0 }); } };
   const archiveDocument = async (document: DocumentRecord) => { const timestamp = nowIso(); const saved = await persistDocument({ ...document, status: 'archived' as DocumentStatus, archivedAt: timestamp, updatedAt: timestamp, syncState: user?.preview ? 'local' : 'pending' }); setDocuments((all) => all.map((item) => item.id === saved.id ? saved : item)); };
+  const deleteOverdueDocument = async (document: DocumentRecord) => {
+    await removeLocalDocumentAndTasks(document.id);
+    setDocuments((all) => all.filter((item) => item.id !== document.id));
+    setTasks((all) => all.filter((task) => task.documentId !== document.id));
+    if (!user || user.preview || !supabase) return;
+    try {
+      await deleteRemoteDocument(document);
+    } catch {
+      await queueMutation({ id: createId('mutation'), ownerId: document.ownerId, entity: 'document', operation: 'delete', payload: JSON.stringify(document), localTimestamp: nowIso(), retryCount: 0 });
+    }
+  };
+  const reviewOverdueTask = (task: TaskRecord) => {
+    const document = documents.find((item) => item.id === task.documentId);
+    if (!document) return;
+    Alert.alert('Is this task resolved?', `Choose what to do with "${task.title}" and its plan.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Keep in Vault',
+        onPress: () => {
+          void archiveDocument(document).catch((error) => {
+            Alert.alert('Could not move to Vault', error instanceof Error ? error.message : 'Please try again.');
+          });
+        },
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => Alert.alert('Delete this plan permanently?', 'This removes the plan, all linked tasks, and any retained image. This cannot be undone.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete permanently',
+            style: 'destructive',
+            onPress: () => {
+              void deleteOverdueDocument(document).catch((error) => {
+                Alert.alert('Could not delete plan', error instanceof Error ? error.message : 'Please try again.');
+              });
+            },
+          },
+        ]),
+      },
+    ]);
+  };
   const confirmArchive = async () => {
     if (!archiveReview) return;
     setArchiving(true);
@@ -693,7 +813,7 @@ function App() {
     setVaultActionBusy(false);
     if (failedIds.size) Alert.alert('Could not delete all records', `${selected.length - failedIds.size} deleted. Please try the remaining record${failedIds.size === 1 ? '' : 's'} again.`);
   };
-  const activeDocuments = documents.filter((document) => document.status === 'active'); const activeTasks = tasks.filter((task) => activeDocuments.some((document) => document.id === task.documentId)); const activePlans = activeDocuments.map((document) => ({ document, tasks: activeTasks.filter((task) => task.documentId === document.id).sort((a, b) => a.position - b.position) })).filter(({ tasks: planTasks }) => planTasks.length > 0).sort((a, b) => (a.document.details.dueDate ?? '9999').localeCompare(b.document.details.dueDate ?? '9999')); const sortByDeadline = (a: TaskRecord, b: TaskRecord) => Number(a.completed) - Number(b.completed) || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'); const nextTasks = getCurrentTasks(activeTasks).sort(sortByDeadline); const recentlyCompletedTasks = activeTasks.filter((task) => recentlyCompletedTaskIds.has(task.id)); const temporarilyHiddenDocumentIds = new Set(recentlyCompletedTasks.map((task) => task.documentId)); const upcomingTasks = [...recentlyCompletedTasks, ...nextTasks.filter((task) => !temporarilyHiddenDocumentIds.has(task.documentId))]; const upcomingReminders = getUpcomingTaskReminders(nextTasks); const tasksForSelectedDay = activeTasks.filter((task) => task.dueDate === selectedDate).sort(sortByDeadline); const readyToArchive = activeDocuments.filter((document) => { const documentTasks = tasks.filter((task) => task.documentId === document.id); return documentTasks.length > 0 && documentTasks.every((task) => task.completed) && !documentTasks.some((task) => recentlyCompletedTaskIds.has(task.id)); }); const selectedTask = taskDetails ? tasks.find((task) => task.id === taskDetails.id) ?? taskDetails : null; const selectedTaskDocument = selectedTask ? documents.find((document) => document.id === selectedTask.documentId) : undefined; const tasksInSelectedPlan = selectedTask ? tasks.filter((task) => task.documentId === selectedTask.documentId).sort((a, b) => a.position - b.position) : [];
+  const activeDocuments = documents.filter((document) => document.status === 'active'); const activeTasks = tasks.filter((task) => activeDocuments.some((document) => document.id === task.documentId)); const activePlans = activeDocuments.map((document) => ({ document, tasks: activeTasks.filter((task) => task.documentId === document.id).sort((a, b) => a.position - b.position) })).filter(({ tasks: planTasks }) => planTasks.length > 0).sort((a, b) => (a.document.details.dueDate ?? '9999').localeCompare(b.document.details.dueDate ?? '9999')); const sortByDeadline = (a: TaskRecord, b: TaskRecord) => Number(a.completed) - Number(b.completed) || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'); const nextTasks = getCurrentTasks(activeTasks).sort(sortByDeadline); const recentlyCompletedTasks = activeTasks.filter((task) => recentlyCompletedTaskIds.has(task.id)); const temporarilyHiddenDocumentIds = new Set(recentlyCompletedTasks.map((task) => task.documentId)); const upcomingTasks = [...recentlyCompletedTasks, ...nextTasks.filter((task) => !temporarilyHiddenDocumentIds.has(task.documentId))]; const upcomingReminders = getUpcomingTaskReminders(nextTasks); const tasksForSelectedDay = activeTasks.filter((task) => task.dueDate === selectedDate).sort(sortByDeadline); const overdueCautionTasks = getRecentOverdueTasks(activeTasks); const overdueFollowUpTasks = getOverdueTasksForFollowUp(activeTasks).filter((task) => !dismissedOverdueTaskIds.has(task.id)); const readyToArchive = activeDocuments.filter((document) => { const documentTasks = tasks.filter((task) => task.documentId === document.id); return documentTasks.length > 0 && documentTasks.every((task) => task.completed) && !documentTasks.some((task) => recentlyCompletedTaskIds.has(task.id)); }); const selectedTask = taskDetails ? tasks.find((task) => task.id === taskDetails.id) ?? taskDetails : null; const selectedTaskDocument = selectedTask ? documents.find((document) => document.id === selectedTask.documentId) : undefined; const tasksInSelectedPlan = selectedTask ? tasks.filter((task) => task.documentId === selectedTask.documentId).sort((a, b) => a.position - b.position) : [];
   const selectedArchivedVaultDocuments = documents.filter((document) => document.status === 'archived' && selectedVaultIds.has(document.id));
   const refreshDeliveredReminders = async (showError = false) => {
     try {
@@ -768,6 +888,32 @@ function App() {
       </Svg>
     </View>
     {user.preview ? <Card style={styles.previewCard}><Pill text="Local preview" tone="warning" /><Text style={layout.body}>A space to try things out. Your preview stays on this device.</Text></Card> : null}
+    {overdueCautionTasks.map((task) => {
+      const document = activeDocuments.find((item) => item.id === task.documentId);
+      return <Card key={task.id} style={styles.overdueReviewCard}>
+        <Pill text="Overdue · action needed" tone="warning" />
+        <Text style={layout.heading}>{task.title}</Text>
+        <Text style={layout.subtitle}>{document?.details.title ?? 'Plan'} · Due {dayLabel(task.dueDate)}</Text>
+        <Text style={layout.body}>This task is past due. Review it or mark it done.</Text>
+        <View style={styles.overdueReviewActions}>
+          <Button label="Review task" kind="secondary" onPress={() => { setTaskEditErrors({}); setEditTask(task); }} />
+          <Button label="Mark done" onPress={() => void toggleTask(task)} />
+        </View>
+      </Card>;
+    })}
+    {overdueFollowUpTasks.map((task) => {
+      const document = activeDocuments.find((item) => item.id === task.documentId);
+      return <Card key={task.id} style={styles.overdueReviewCard}>
+        <View style={styles.overdueReviewHeader}>
+          <View style={styles.grow}><Pill text="Overdue more than 30 days" tone="warning" /><Text style={[layout.heading, styles.overdueTaskTitle]}>{task.title}</Text><Text style={layout.subtitle}>{document?.details.title ?? 'Plan'} · Due {dayLabel(task.dueDate)}</Text></View>
+        </View>
+        <Text style={layout.body}>Is this task resolved? Move its plan to Vault or delete it.</Text>
+        <View style={styles.overdueReviewActions}>
+          <Button label="Dismiss" kind="secondary" onPress={() => setDismissedOverdueTaskIds((current) => new Set(current).add(task.id))} />
+          <Button label="Done" onPress={() => reviewOverdueTask(task)} />
+        </View>
+      </Card>;
+    })}
     {readyToArchive.length ? <><Text style={layout.heading}>Ready for Vault</Text>{readyToArchive.map((document) => <Card key={document.id}><Text style={layout.heading}>{document.details.title}</Text><Text style={layout.subtitle}>All tasks are complete. Review the record before moving it to your Vault.</Text><Button label="Review record" onPress={() => setArchiveReview(document)} /></Card>)}</> : null}
     <View style={styles.homePlanSection}>
     <View style={styles.sectionHeader}>
@@ -1113,7 +1259,7 @@ function App() {
       <View style={styles.modalBackdrop}>
         {vaultDocumentDetails ? <View style={[styles.sheetKeyboard, styles.notificationSheet, styles.vaultDetailsSheet]}>
           <View style={styles.notificationHeader}>
-            <View style={styles.grow}><Text style={layout.heading}>Archived record</Text><Text style={layout.subtitle}>Review the saved details and completed tasks.</Text></View>
+            <View style={styles.grow}><Text style={layout.heading}>Archived record</Text><Text style={layout.subtitle}>Review the saved details and task history.</Text></View>
             <Pressable accessibilityRole="button" accessibilityLabel="Close archived record details" hitSlop={10} disabled={vaultActionBusy} onPress={() => setVaultDocumentDetails(null)}><AppIcon name="x" size={22} color={colors.textMuted} /></Pressable>
           </View>
           <ScrollView contentContainerStyle={[styles.notificationList, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -1130,9 +1276,9 @@ function App() {
             <Card>
               <Text style={layout.heading}>Tasks in this plan</Text>
               {tasks.filter((task) => task.documentId === vaultDocumentDetails.id).sort((a, b) => a.position - b.position).map((task) => <View key={task.id} style={styles.planTaskRow}>
-                <View style={[styles.planTaskMark, styles.planTaskMarkComplete]}><AppIcon name="check" size={14} color={colors.onPrimary} /></View>
-                <View style={styles.grow}><Text style={[styles.taskTitle, styles.completedText]}>{task.title}</Text><View style={styles.dueDateLine}><AppIcon name="calendar" size={14} color={colors.textMuted} /><Text style={styles.taskMeta}>{dayLabel(task.dueDate)}</Text></View></View>
-                <Pill text="Done" tone="success" />
+                <View style={[styles.planTaskMark, task.completed && styles.planTaskMarkComplete]}>{task.completed ? <AppIcon name="check" size={14} color={colors.onPrimary} /> : null}</View>
+                <View style={styles.grow}><Text style={[styles.taskTitle, task.completed && styles.completedText]}>{task.title}</Text><View style={styles.dueDateLine}><AppIcon name="calendar" size={14} color={colors.textMuted} /><Text style={styles.taskMeta}>{dayLabel(task.dueDate)}</Text></View></View>
+                <Pill text={task.completed ? 'Done' : 'Not done'} tone={task.completed ? 'success' : 'warning'} />
               </View>)}
             </Card>
             <View style={styles.archiveReviewActions}>
@@ -1187,7 +1333,12 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   notificationList: { gap: 10, paddingTop: 4 },
   archiveReviewActions: { gap: 10, marginTop: 2 },
   notificationItem: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.surface, padding: 14 },
+  overdueReviewCard: { borderWidth: 1, borderColor: colors.warningSurface },
+  overdueReviewHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  overdueTaskTitle: { marginTop: 6 },
+  overdueReviewActions: { gap: 10 },
   notificationIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blueSurface },
+  taskOverdueMeta: { color: colors.warning, fontWeight: '700' },
   notificationTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
   notificationBody: { color: colors.textMuted, fontSize: 13, marginTop: 3 },
   notificationDate: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 5 },
