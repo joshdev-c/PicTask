@@ -103,6 +103,17 @@ const isoDateValue = (date: Date) => `${date.getFullYear()}-${String(date.getMon
 const isPastDate = (value: string) => value < isoDateValue(new Date());
 const peso = (value?: number) => value === undefined ? 'Amount not detected' : value.toLocaleString('en-PH', { style: 'currency', currency: 'PHP' });
 const nowIso = () => new Date().toISOString();
+const getFunctionErrorMessage = async (error: unknown) => {
+  const fallback = error instanceof Error ? error.message : 'Please try again.';
+  if (!error || typeof error !== 'object' || !('context' in error) || !(error.context instanceof Response)) return fallback;
+  try {
+    const body: unknown = await error.context.clone().json();
+    if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') return body.error;
+  } catch {
+    return fallback;
+  }
+  return fallback;
+};
 const isValidIsoDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) return false;
@@ -855,7 +866,43 @@ function App() {
   const toggleBiometric = async (next: boolean) => { if (next) { if (!(await LocalAuthentication.hasHardwareAsync())) { Alert.alert('Not available', 'This device does not offer biometric or device-credential authentication.'); return; } const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Confirm Vault protection', disableDeviceFallback: false }); if (!result.success) return; } setBiometricEnabled(next); await SecureStore.setItemAsync('pictask.biometric', String(next)); };
   const exportData = async () => { await Share.share({ title: 'PicTask export', message: JSON.stringify({ exportedAt: nowIso(), documents, tasks }, null, 2) }); };
   const resetPassword = async () => { if (!supabase || !user || user.preview) return; const { error } = await supabase.auth.resetPasswordForEmail(user.email); Alert.alert(error ? 'Could not send email' : 'Email sent', error?.message ?? 'Check your inbox for password-reset instructions.'); };
-  const deleteAccount = () => Alert.alert('Delete account?', 'This permanently removes your app records, optional vault images, and local cache.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => { void (async () => { if (!user) return; await removeLocalRecords(user.id); if (supabase && !user.preview) { await supabase.functions.invoke('delete-account'); await supabase.auth.signOut(); } setUser(null); })(); } }]);
+  const deleteAccount = () => Alert.alert('Delete account?', 'This permanently removes your app records, optional vault images, and local cache.', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () => {
+        void (async () => {
+          if (!user) return;
+          if (!user.preview) {
+            if (!supabase) {
+              Alert.alert('Could not delete account', 'Supabase is not configured. Your account and data have not been deleted.');
+              return;
+            }
+            const { error } = await supabase.functions.invoke('delete-account');
+            if (error) {
+              console.error('Account deletion failed', error);
+              Alert.alert('Could not delete account', `${await getFunctionErrorMessage(error)} Your data has not been removed from this device.`);
+              return;
+            }
+            const { error: signOutError } = await supabase.auth.signOut();
+            if (signOutError) console.error('Could not clear the deleted account session', signOutError);
+          }
+          try {
+            await removeLocalRecords(user.id);
+          } catch (error) {
+            console.error('Could not remove local records after account deletion', error);
+            Alert.alert('Account deleted', 'Your account was deleted, but some data remains cached on this device. Please clear the app storage or reinstall PicTask.');
+          } finally {
+            setUser(null);
+          }
+        })().catch((error: unknown) => {
+          console.error('Account deletion failed unexpectedly', error);
+          Alert.alert('Could not delete account', error instanceof Error ? error.message : 'Please try again.');
+        });
+      },
+    },
+  ]);
   const signOut = async () => { if (supabase && !user?.preview) await supabase.auth.signOut(); setUser(null); };
   const openNotifications = async () => {
     setNotificationsVisible(true);

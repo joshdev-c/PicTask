@@ -50,7 +50,13 @@ Camera, on-device OCR, biometric authentication, and local notifications require
    - `supabase/migrations/001_initial.sql`
    - `supabase/migrations/002_owner_integrity.sql`
 
-   Deploy the `supabase/functions/delete-account` Edge Function before testing account deletion. The function uses Supabase-provided environment variables and the service role only on the server.
+   Deploy the `supabase/functions/delete-account` Edge Function before testing account deletion:
+
+   ```sh
+   supabase functions deploy delete-account
+   ```
+
+   The function uses Supabase-provided environment variables and the service role only on the server.
 
 4. Start the Expo development server:
 
