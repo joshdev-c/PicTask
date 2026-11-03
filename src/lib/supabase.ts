@@ -44,6 +44,13 @@ export async function syncTask(record: TaskRecord) {
   if (error) throw error;
 }
 
+export async function getVaultImageUrl(path: string) {
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.storage.from('vault-images').createSignedUrl(path, 60 * 60);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
 export async function deleteRemoteTask(id: string) {
   if (!supabase) return;
   const { error } = await supabase.from('tasks').delete().eq('id', id);

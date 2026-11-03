@@ -35,7 +35,7 @@ export async function scheduleTaskReminders(task: TaskRecord) {
     const trigger = new Date(due.getTime() - days * 24 * 60 * 60 * 1000);
     if (trigger.getTime() > now) {
       await Notifications.scheduleNotificationAsync({
-        content: { title: 'PicTask reminder', body: `${task.title} is due in ${days} day${days === 1 ? '' : 's'}.`, data: { taskId: task.id } },
+        content: { title: 'PicTask reminder', body: `${task.title} is due in ${days} day${days === 1 ? '' : 's'}.`, data: { taskId: task.id, daysUntilDue: days } },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trigger },
       });
     }

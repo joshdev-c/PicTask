@@ -3,21 +3,21 @@ import { StyleSheet, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const lightColors = {
-  background: '#F5F4F0', surface: '#FFFFFF', surfaceMuted: '#E8EEF0',
-  primary: '#0B5664', primaryDark: '#12343B', text: '#18282B', textMuted: '#627276',
-  border: '#E4E6E3', success: '#2D7180', warning: '#94601D', danger: '#B34249', dangerFill: '#A52D38',
-  white: '#FFFFFF', onPrimary: '#FFFFFF', hero: '#E5F0F2', heroBorder: '#D3E5E8',
-  successSurface: '#E5F0F2', warningSurface: '#FAEDD9', blueSurface: '#E1EEF5',
-  input: '#FAFAF8', overlay: 'rgba(15, 35, 39, 0.55)',
+  background: '#EAF6FA', surface: '#FFFFFF', surfaceMuted: '#E0F2F3',
+  primary: '#087F80', primaryDark: '#101B36', text: '#18243B', textMuted: '#68748A',
+  border: '#D8E9EF', success: '#087F80', warning: '#94601D', danger: '#B34249', dangerFill: '#A52D38',
+  white: '#FFFFFF', onPrimary: '#FFFFFF', hero: '#DDF3F2', heroBorder: '#BCE4E3',
+  successSurface: '#DDF3F2', warningSurface: '#FAEDD9', blueSurface: '#E2F1F7',
+  input: '#F8FCFD', overlay: 'rgba(15, 35, 55, 0.55)',
 };
 export type ThemeColors = typeof lightColors;
 export const darkColors: ThemeColors = {
-  background: '#101B1F', surface: '#1A292E', surfaceMuted: '#263C43',
-  primary: '#80C4D0', primaryDark: '#D9F0F2', text: '#E9F1F1', textMuted: '#ADC0C3',
-  border: '#344A50', success: '#8CC7D0', warning: '#F0C17C', danger: '#FF9DA4', dangerFill: '#A52D38',
-  white: '#FFFFFF', onPrimary: '#10343A', hero: '#203A40', heroBorder: '#34555E',
-  successSurface: '#203B40', warningSurface: '#3F3423', blueSurface: '#233B46',
-  input: '#132328', overlay: 'rgba(0, 0, 0, 0.7)',
+  background: '#0B2024', surface: '#132D32', surfaceMuted: '#1D3C40',
+  primary: '#62C8BB', primaryDark: '#D9F5F0', text: '#E8F4F1', textMuted: '#A5C1BD',
+  border: '#2D4D4F', success: '#72D3C4', warning: '#F0C17C', danger: '#FF9DA4', dangerFill: '#A52D38',
+  white: '#FFFFFF', onPrimary: '#10343A', hero: '#183D40', heroBorder: '#2C5D5D',
+  successSurface: '#1B4141', warningSurface: '#3F3423', blueSurface: '#1B393E',
+  input: '#10272B', overlay: 'rgba(0, 0, 0, 0.7)',
 };
 
 const createLayout = (colors: ThemeColors) => StyleSheet.create({
